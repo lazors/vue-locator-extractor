@@ -1,576 +1,430 @@
-# Vue Locator Extractor for Playwright
+# Enhanced Vue Locator Extractor - Advanced Features
 
-A powerful tool to extract locators from Vue.js templates and generate production-ready Playwright Page Object Models with robustness analysis and improvement recommendations.
+## 🚀 Overview
 
-## 🎯 Overview
+The Enhanced Vue Locator Extractor has been significantly upgraded to handle real-world Vue.js applications with dynamic content, conditional rendering, custom components, and JavaScript/TypeScript generated elements.
 
-This project scans Vue.js template files (`.vue`) and intelligently extracts locators, classifying them as **robust** (production-ready) or **fragile** (needs improvement). It generates Playwright-compatible Page Object Models and provides actionable warnings for improving test stability.
+## 🎯 Key Enhancements
 
-## ✨ Key Features
+### 1. **Dynamic Content Detection (v-for)**
 
-- **🛡️ Robust vs Fragile Classification**: Automatically categorizes locators by stability
-- **⚠️ Smart Warnings**: Identifies fragile locators and suggests improvements
-- **🎭 Playwright Integration**: Generates ready-to-use Page Object Models
-- **🔍 Comprehensive Locator Support**: Extracts 8 types of locators including XPath
-- **📊 Detailed Analysis**: Provides robustness ratios and improvement metrics
-- **🚀 Production Ready**: Separates robust locators for immediate use
+- **Detects**: Elements rendered in loops using `v-for`
+- **Marks**: As `[DYNAMIC]` in output
+- **Analysis**: Identifies elements that may be repeated
+- **Testing Guidance**: Use `.nth(index)`, `.count()`, or pattern-based selectors
 
-## 📂 Project Structure
+### 2. **Conditional Element Detection (v-if, v-show)**
+
+- **Detects**: Elements that may not always be present
+- **Marks**: As `[CONDITIONAL]` in output
+- **Analysis**: Identifies conditional rendering patterns
+- **Testing Guidance**: Use `.isVisible()` checks and `.waitFor()` methods
+
+### 3. **Custom Component Analysis**
+
+- **Detects**: Vue custom components (`<MyComponent>`, `<AppButton>`)
+- **Reports**: Warnings for unextractable locators
+- **Recommendations**: Suggests adding test attributes to component roots
+- **Line Numbers**: Provides exact locations for review
+
+### 4. **JavaScript/TypeScript Integration**
+
+- **Scans**: `.js` and `.ts` files for element generation
+- **Detects**: `createElement`, `h()` functions, template strings
+- **Extracts**: Test attributes from dynamically created elements
+- **Marks**: All JS/TS elements as `[DYNAMIC]`
+
+## 📊 Enhanced Output Classification
+
+### Status Indicators
+
+- ✅ **Robust**: Production-ready locators
+- 🔸 **Fragile**: Needs improvement (class-based, XPath text)
+- 🔄 **Dynamic**: May be repeated (v-for)
+- ❓ **Conditional**: May not always be present (v-if, v-show)
+- 🎪 **Custom Component**: Needs manual review
+
+### Context Information
+
+- **Parent Context**: Shows containing directive context
+- **Vue Directives**: Lists detected directives
+- **Line Numbers**: For custom component warnings
+- **File Types**: Vue templates vs JS/TS generation
+
+## 🛠️ Technical Implementation
+
+### Vue Directive Detection
+
+```typescript
+// Detects Vue directives affecting element behavior
+const directiveMatches = attributeString.matchAll(/(v-[\w-]+|@\w+|:\w+)/g);
+
+// Classifies directives
+if (['v-for'].includes(match[1])) {
+  isDynamic = true;
+}
+if (['v-if', 'v-else-if', 'v-show'].includes(match[1])) {
+  isConditional = true;
+}
+```
+
+### Custom Component Recognition
+
+```typescript
+// Identifies custom components
+const customComponentPattern = /^[A-Z][a-zA-Z0-9]*$/;
+const isCustomComponent =
+  customComponentPattern.test(tagName) || tagName.includes('-');
+```
+
+### JavaScript Element Extraction
+
+```typescript
+// Patterns for Vue h() function
+/h\(\s*['"`](\w+)['"`]\s*,\s*{([^}]*)}/g
+
+// Patterns for createElement
+/createElement\(\s*['"`](\w+)['"`]\s*,\s*{([^}]*)}/g
+
+// Template string patterns
+/`[^`]*<(\w+)[^>]*([^`]*)`/g
+```
+
+## 📝 Usage Examples
+
+### Basic Dynamic Content
+
+```vue
+<template>
+  <!-- Static element -->
+  <button data-testid="refresh-btn">Refresh</button>
+
+  <!-- Conditional element -->
+  <div v-if="isLoading" data-testid="loading-indicator">Loading...</div>
+
+  <!-- Dynamic list -->
+  <li v-for="user in users" :key="user.id" :data-testid="`user-${user.id}`">
+    <button :data-testid="`edit-${user.id}`">Edit</button>
+    <button v-if="user.canDelete" :data-testid="`delete-${user.id}`">
+      Delete
+    </button>
+  </li>
+</template>
+```
+
+**Extraction Results:**
 
 ```
-vue-locator-extractor/
-├── src/
-│   ├── extractLocators.ts        ← Main extraction engine
-│   └── scanVueTemplates.ts       ← Vue template parser
-├── output/                       ← Generated files (auto-ignored)
-│   ├── pageObjects.ts            ← Robust Playwright Page Objects
-│   ├── fragileLocators.ts        ← Fragile locators with warnings
-│   ├── locatorMap.ts             ← Complete locator map
-│   └── fragileLocatorMap.ts      ← Improvement tracking map
-├── examples/
-│   └── playwrightExample.ts      ← Usage examples
-├── .cursor/rules/                ← Cursor IDE rules
-└── test-vue-src/                 ← Sample Vue files
+✅ refresh_btn: data-testid="refresh-btn"
+❓ loading_indicator_conditional: data-testid="loading-indicator" [CONDITIONAL]
+🔄 user_user_id_dynamic: data-testid="`user-${user.id}`" [DYNAMIC]
+✅ edit_user_id: data-testid="`edit-${user.id}`" (inside li with dynamic directives)
+❓ delete_user_id_conditional: data-testid="`delete-${user.id}`" [CONDITIONAL]
 ```
 
-## 🚀 Installation
+### Custom Component Detection
 
-```bash
-npm install
+```vue
+<template>
+  <div>
+    <!-- Standard element - extracted normally -->
+    <button data-testid="submit-btn">Submit</button>
+
+    <!-- Custom components - warnings generated -->
+    <UserModal v-if="showModal" :user="selectedUser" />
+    <DataTable :data="tableData" @row-click="handleRowClick" />
+  </div>
+</template>
 ```
 
-## 📋 Usage
+**Custom Component Warnings:**
 
-### Basic Usage (Default Directory)
-
-```bash
-npm run extract
+```
+⚠️  CUSTOM COMPONENT WARNINGS:
+🔸 my-component.vue: Custom component <UserModal> at line 5 — locator not extracted. Review component source or ensure it passes data-testid down to root element.
+🔸 my-component.vue: Custom component <DataTable> at line 6 — locator not extracted. Review component source or ensure it passes data-testid down to root element.
 ```
 
-### Scan Your Vue Project
+### JavaScript Generated Elements
 
-```bash
-npm run extract "/path/to/your/vue/project"
+```javascript
+// Vue h() function
+export function createButton(userId) {
+  return h(
+    'button',
+    {
+      'data-testid': `dynamic-btn-${userId}`,
+      class: 'btn btn-primary',
+    },
+    'Click Me'
+  );
+}
+
+// Template string
+export function generateForm(formId) {
+  return `
+    <form data-testid="generated-form-${formId}">
+      <input type="text" data-testid="form-input" />
+      <button type="submit" data-testid="form-submit">Submit</button>
+    </form>
+  `;
+}
 ```
 
-### Examples
+**JS/TS Extraction Results:**
 
-```bash
-# Scan current directory
-npm run extract "."
-
-# Scan parent directory
-npm run extract "../my-vue-app"
-
-# Scan specific project
-npm run extract "C:\Users\username\projects\my-vue-app"
+```
+🔄 dynamic_btn_user_id: data-testid="dynamic-btn-${userId}" [DYNAMIC] (JS createElement)
+🔄 generated_form_form_id: data-testid="generated-form-${formId}" [DYNAMIC] (JS template string)
+🔄 form_input: data-testid="form-input" [DYNAMIC] (JS template string)
+🔄 form_submit: data-testid="form-submit" [DYNAMIC] (JS template string)
 ```
 
-## 🔍 Supported Locator Types
+## 🧪 Enhanced Testing Patterns
 
-### **Robust Locators** (Recommended for Production):
+### Conditional Element Testing
 
-- `data-testid="value"` → `page.getByTestId('value')`
-- `data-test="value"` → `page.locator('[data-test="value"]')`
-- `id="value"` → `page.locator('#value')`
-- `name="value"` → `page.locator('[name="value"]')`
-- **Interactive XPath**: `//button`, `//input`, patterns with `btn`
-- **Button Classes**: Any class containing `btn`
+```typescript
+// Handle conditional elements
+test('should handle conditional elements', async ({ page }) => {
+  const dynamicPage = new dynamic_contentPage(page);
 
-### **Fragile Locators** (Need Improvement):
+  // Trigger condition that shows element
+  await dynamicPage.refreshBtn.click();
 
-- `class="nav-link"` → Class-based selectors
-- **Text-based XPath**: `//a[contains(text(),'Reports')]`
-- **Navigation XPath**: `//nav//a[@href='/analytics']`
-- `role="table"` → Generic role selectors
+  // Wait for conditional element
+  await expect(dynamicPage.loadingIndicatorConditional).toBeVisible();
 
-## 📊 Output Files
+  // Wait for condition to change
+  await expect(dynamicPage.loadingIndicatorConditional).not.toBeVisible();
+});
+```
 
-### 1. **`pageObjects.ts`** - Production Ready
+### Dynamic List Testing
+
+```typescript
+// Handle dynamic lists
+test('should handle dynamic user list', async ({ page }) => {
+  // Get all dynamic user items
+  const userItems = page.locator('[data-testid^="user-item-"]');
+  const userCount = await userItems.count();
+
+  // Process each user
+  for (let i = 0; i < userCount; i++) {
+    const userItem = userItems.nth(i);
+    const userId = await userItem
+      .getAttribute('data-testid')
+      ?.replace('user-item-', '');
+
+    // Use dynamic test ID patterns
+    await page.getByTestId(`edit-user-${userId}`).click();
+  }
+});
+```
+
+### Custom Component Testing
+
+```typescript
+// Test custom components by behavior
+test('should handle custom modal component', async ({ page }) => {
+  // Trigger modal
+  await page.getByTestId('open-modal-btn').click();
+
+  // Test modal by common patterns since internals aren't extracted
+  const modal = page
+    .locator('[role="dialog"]')
+    .or(page.locator('.modal'))
+    .or(page.locator('[data-testid*="modal"]'));
+
+  await expect(modal).toBeVisible();
+
+  // Test close functionality
+  const closeBtn = page
+    .locator('[aria-label="Close"]')
+    .or(page.locator('button:has-text("Close")'));
+
+  await closeBtn.click();
+  await expect(modal).not.toBeVisible();
+});
+```
+
+## 📊 Enhanced Analysis Output
+
+### Summary Statistics
+
+```
+📊 ENHANCED ANALYSIS SUMMARY:
+   📄 Total files processed: 3
+   🎯 Total locators found: 102
+   ✅ Robust locators: 76 (ready for production)
+   🔸 Fragile locators: 26 (9 with warnings)
+   🔄 Dynamic locators: 24 (may be repeated)
+   ❓ Conditional locators: 20 (may not always be present)
+   🎪 Custom components: 2 (need manual review)
+   📈 Robustness ratio: 75%
+```
+
+### Generated Files with Enhanced Metadata
+
+#### `output/pageObjects.ts`
 
 ```typescript
 // ROBUST PAGE OBJECT MODEL - Recommended for E2E testing
-import { Page } from '@playwright/test';
+// NOTE: Some locators are marked as DYNAMIC or CONDITIONAL - test carefully for element presence
 
-export class dashboardPage {
+export class dynamic_contentPage {
   constructor(protected page: Page) {}
 
-  // button with data-testid: "logout-btn" (robust)
-  logoutBtn = this.page.getByTestId('logout-btn');
+  // button with data-testid: "refresh-btn" (robust)
+  refreshBtn = this.page.getByTestId('refresh-btn');
 
-  // input with placeholder: "Search orders..." (robust)
-  searchOrdersInput = this.page.getByPlaceholder('Search orders...');
+  // div with data-testid: "loading-indicator" (robust) - CONDITIONAL (may not always be present)
+  loadingIndicatorConditional = this.page.getByTestId('loading-indicator');
+
+  // li with data-testid: "`user-item-${user.id}`" (robust) - DYNAMIC (may be repeated)
+  userItemDynamic = this.page.getByTestId('`user-item-${user.id}`');
 }
 ```
 
-### 2. **`fragileLocators.ts`** - Needs Improvement
-
-```typescript
-// FRAGILE LOCATORS - Consider improving with stable test attributes
-export class dashboardPage {
-  // a with class: "nav-link" (fragile)
-  // WARNING: Consider adding data-testid="nav-link"
-  classNavLink = this.page.locator('.nav-link');
-}
-```
-
-### 3. **`locatorMap.ts`** - Complete Reference
+#### `output/locatorMap.ts`
 
 ```typescript
 export const locatorMap = {
-  dashboard: {
-    // button - data-testid: "logout-btn" (robust)
-    logout_btn: '[data-testid="logout-btn"]',
-    // a - class: "nav-link" (fragile)
-    class_nav_link: '.nav-link',
+  dynamic_content: {
+    // button - data-testid: "refresh-btn" (robust)
+    refresh_btn: '[data-testid="refresh-btn"]',
+    // div - data-testid: "loading-indicator" (robust) - CONDITIONAL
+    loading_indicator_conditional: '[data-testid="loading-indicator"]',
+    // li - data-testid: "`user-item-${user.id}`" (robust) - DYNAMIC
+    user_item_dynamic: '[data-testid="`user-item-${user.id}`"]',
   },
 };
 ```
 
-## ⚠️ Improvement Warnings
+## 🚀 Best Practices
 
-The tool provides specific recommendations for fragile locators:
+### 1. **Improving Custom Components**
 
-```
-⚠️  FRAGILE LOCATOR WARNINGS:
-🔸 dashboard.vue: FRAGILE LOCATOR WARNING: a with class="nav-link" lacks stable test attributes.
-   Consider adding data-testid="nav-link" | Alternative: data-test="nav-link" | Or add unique id="nav-link"
-```
+```vue
+<!-- BEFORE: Unextractable -->
+<MyButton @click="handleClick">Submit</MyButton>
 
-## 📈 Analysis Report
+<!-- AFTER: Extractable -->
+<MyButton data-testid="submit-btn" @click="handleClick">Submit</MyButton>
 
-```
-📊 SUMMARY:
-   Total files processed: 5
-   Robust locators: 24 (ready for production)
-   Fragile locators: 12 (8 with warnings)
-   Robustness ratio: 67%
+<!-- OR: Pass through props -->
+<MyButton :data-testid="testId" @click="handleClick">Submit</MyButton>
 ```
 
-## 🎭 Playwright Integration Example
+### 2. **Dynamic Element Patterns**
+
+```vue
+<!-- Good: Consistent pattern -->
+<li v-for="user in users" :key="user.id" :data-testid="`user-${user.id}`">
+  <button :data-testid="`edit-user-${user.id}`">Edit</button>
+  <button :data-testid="`delete-user-${user.id}`">Delete</button>
+</li>
+
+<!-- Avoid: Inconsistent patterns -->
+<li v-for="user in users" :key="user.id" :data-testid="'user_' + user.id">
+  <button :data-testid="user.id + '-edit'">Edit</button>
+</li>
+```
+
+### 3. **Conditional Element Testing**
 
 ```typescript
-import { test, expect } from '@playwright/test';
-import { dashboardPage } from '../output/pageObjects';
+// Good: Check existence before interaction
+if (await page.getByTestId('conditional-element').isVisible()) {
+  await page.getByTestId('conditional-element').click();
+}
 
-test('should login successfully', async ({ page }) => {
-  const dashboard = new dashboardPage(page);
-
-  await page.goto('/dashboard');
-  await dashboard.searchOrdersInput.fill('test query');
-  await dashboard.logoutBtn.click();
+// Better: Use waitFor with timeout
+await expect(page.getByTestId('conditional-element')).toBeVisible({
+  timeout: 5000,
 });
+await page.getByTestId('conditional-element').click();
 ```
 
-## 🛠️ Configuration
+### 4. **JavaScript Integration**
 
-### Custom Vue Project Path
+```javascript
+// Good: Consistent test attributes in JS
+export function createButton(id) {
+  return h(
+    'button',
+    {
+      'data-testid': `js-button-${id}`,
+      class: 'btn',
+    },
+    'Click'
+  );
+}
+
+// Template strings with test attributes
+export function generateHTML(id) {
+  return `<div data-testid="container-${id}">Content</div>`;
+}
+```
+
+## 🔧 Configuration Options
+
+### Scanning Scope
 
 ```bash
-# Set default path in src/extractLocators.ts
-const vueProjectPath = process.argv[2] || './src'; // Your Vue project path
+# Scan specific Vue project
+npm run extract "/path/to/your/vue/project"
+
+# Scan current directory
+npm run extract "."
 ```
 
-### Ignored Directories
+### File Types Processed
 
-The tool automatically ignores:
+- **Vue Files**: `**/*.vue` (template sections only)
+- **JavaScript**: `**/*.js` (createElement patterns, template strings)
+- **TypeScript**: `**/*.ts` (excluding `.d.ts` files)
+
+### Ignored Directories
 
 - `**/node_modules/**`
 - `**/dist/**`
 - `**/.output/**`
 - `**/build/**`
+- `**/tests/**` (for JS/TS files)
+- `**/test/**` (for JS/TS files)
 
-## 🎯 Best Practices
+## 🚨 Limitations and Recommendations
 
-### 1. **Prioritize Robust Locators**
+### Current Limitations
 
-- Use `data-testid` for interactive elements
-- Add unique `id` attributes where appropriate
-- Prefer semantic locators over class-based ones
+1. **Custom Component Internals**: Cannot extract locators from custom component definitions
+2. **Complex Expressions**: Skips Vue expressions that can't be converted to valid CSS selectors
+3. **Runtime Dependencies**: Cannot analyze elements created by third-party libraries at runtime
 
-### 2. **Improve Fragile Locators**
+### Recommendations
 
-```vue
-<!-- BEFORE (Fragile) -->
-<button class="btn search-btn">Search</button>
+1. **For Custom Components**: Add `data-testid` to root elements or use prop passing
+2. **For Runtime Elements**: Consider dynamic extraction using Playwright's live DOM inspection
+3. **For Complex Scenarios**: Combine static extraction with runtime discovery patterns
 
-<!-- AFTER (Robust) -->
-<button data-testid="search-btn" class="btn search-btn">Search</button>
-```
+### Future Enhancements
 
-### 3. **Use Generated Page Objects**
+- **Component Resolution**: Parse and resolve custom component definitions
+- **Runtime Integration**: Playwright plugin for live DOM extraction
+- **Smart Suggestions**: AI-powered recommendations for test attribute placement
+- **Visual Mapping**: Generate visual test coverage maps
 
-```typescript
-// Use robust Page Objects for critical test paths
-const robust = new RobustDashboardPage(page);
-await robust.performCriticalUserFlow();
-```
+## 📚 Advanced Usage Examples
+
+See `examples/enhanced-playwright-example.ts` for comprehensive examples including:
+
+- Dynamic list processing
+- Conditional element handling
+- Custom component testing patterns
+- JavaScript integration examples
+- Advanced helper utilities
 
 ## 🤝 Contributing
 
-Feel free to submit issues and enhancement requests!
-
-## 📄 License
-
-MIT License - see LICENSE file for details.
-
----
-
-# 🎭 Playwright Page Object Model Patterns
-
-## Page Object Structure
-
-### Base Page Object Class
-
-Reference the generated classes in `output/pageObjects.ts`:
-
-```typescript
-import { Page } from '@playwright/test';
-
-export class BasePage {
-  constructor(protected page: Page) {}
-
-  // Common navigation methods
-  async goto(url: string) {
-    await this.page.goto(url);
-  }
-
-  async waitForPageLoad() {
-    await this.page.waitForLoadState('networkidle');
-  }
-}
-```
-
-### Component-Specific Page Objects
-
-Extend base classes with component-specific functionality:
-
-```typescript
-export class DashboardPageActions extends dashboardPage {
-  constructor(page: Page) {
-    super(page);
-  }
-
-  // High-level business actions
-  async performLogin(username: string, password: string) {
-    await this.usernameInput.fill(username);
-    await this.passwordInput.fill(password);
-    await this.loginBtn.click();
-  }
-
-  // Element interaction patterns
-  async verifyElementsVisible() {
-    await expect(this.userCount).toBeVisible();
-    await expect(this.orderCount).toBeVisible();
-  }
-}
-```
-
-## Locator Method Mapping
-
-### Robust Locator Mapping
-
-Map different locator types to appropriate Playwright methods:
-
-```typescript
-// data-testid → getByTestId (preferred)
-submitBtn = this.page.getByTestId('submit-btn');
-
-// id → locator with #
-usernameInput = this.page.locator('#username');
-
-// name → locator with [name]
-passwordField = this.page.locator('[name="password"]');
-
-// aria-label → getByLabel
-saveButton = this.page.getByLabel('Save changes');
-
-// role → getByRole
-navigationMenu = this.page.getByRole('navigation');
-
-// placeholder → getByPlaceholder
-searchInput = this.page.getByPlaceholder('Search orders...');
-```
-
-### XPath Locator Handling
-
-For complex selectors and relationships:
-
-```typescript
-// XPath locators (use when CSS selectors are insufficient)
-complexElement = this.page.locator(
-  '//tr[td[contains(text(),"John")]//button[@aria-label="Edit"]'
-);
-
-// Position-based selection
-thirdStatCard = this.page.locator('//div[@class="stat-card"][position()=3]');
-
-// Text content matching
-reportsLink = this.page.locator('//a[contains(text(),"Reports")]');
-```
-
-## Dynamic Locator Patterns
-
-### Parameterized Methods
-
-Handle dynamic content with method parameters:
-
-```typescript
-class UserManagementPage extends basePage {
-  // Dynamic user selection
-  getUserRow(userName: string) {
-    return this.page.locator(`//tr[td[contains(text(),'${userName}')]]`);
-  }
-
-  async editUser(userName: string) {
-    await this.page.locator(`[data-testid="edit-user-${userName}"]`).click();
-  }
-
-  async deleteUser(userId: string) {
-    await this.page.locator(`[data-testid="delete-user-${userId}"]`).click();
-  }
-}
-```
-
-### List and Table Operations
-
-Handle collections and tables efficiently:
-
-```typescript
-class DataTablePage extends basePage {
-  // Get all rows
-  get allUserRows() {
-    return this.page.locator('[data-testid^="user-row-"]');
-  }
-
-  // Count visible items
-  async getVisibleRowCount() {
-    return await this.allUserRows.count();
-  }
-
-  // Find by text content
-  async findRowByText(searchText: string) {
-    return this.page.locator(`//tr[td[contains(text(),'${searchText}')]]`);
-  }
-}
-```
-
-## Error Handling and Reliability
-
-### Wait Strategies
-
-Implement proper waiting mechanisms:
-
-```typescript
-class ReliablePage extends basePage {
-  async waitForElementReady(locator: Locator) {
-    await locator.waitFor({ state: 'visible' });
-    await expect(locator).toBeEnabled();
-  }
-
-  async waitForPageLoad() {
-    await expect(this.pageTitle).toBeVisible();
-    await this.page.waitForLoadState('networkidle');
-  }
-
-  async retryAction(action: () => Promise<void>, maxRetries = 3) {
-    for (let i = 0; i < maxRetries; i++) {
-      try {
-        await action();
-        return;
-      } catch (error) {
-        if (i === maxRetries - 1) throw error;
-        await this.page.waitForTimeout(1000);
-      }
-    }
-  }
-}
-```
-
-### Robustness Checks
-
-Validate element states before interaction:
-
-```typescript
-async safeClick(locator: Locator) {
-  await expect(locator).toBeVisible();
-  await expect(locator).toBeEnabled();
-  await locator.click();
-}
-
-async safeFill(locator: Locator, text: string) {
-  await expect(locator).toBeVisible();
-  await expect(locator).toBeEditable();
-  await locator.fill(text);
-}
-```
-
-## Test Organization Patterns
-
-### Test Suite Structure
-
-Organize tests by functionality and page:
-
-```typescript
-test.describe('Dashboard Functionality', () => {
-  let dashboard: DashboardPageActions;
-
-  test.beforeEach(async ({ page }) => {
-    dashboard = new DashboardPageActions(page);
-    await dashboard.goto('/dashboard');
-    await dashboard.waitForPageLoad();
-  });
-
-  test('should display user statistics', async () => {
-    await dashboard.verifyElementsVisible();
-    const stats = await dashboard.getStatsValues();
-    expect(stats.users).toBeGreaterThan(0);
-  });
-});
-```
-
-### Reusable Actions
-
-Create reusable action patterns:
-
-```typescript
-class CommonActions {
-  constructor(private page: Page) {}
-
-  async loginAs(userType: 'admin' | 'user') {
-    const credentials =
-      userType === 'admin'
-        ? { username: 'admin@test.com', password: 'admin123' }
-        : { username: 'user@test.com', password: 'user123' };
-
-    await this.page.goto('/login');
-    await this.page.getByTestId('username-input').fill(credentials.username);
-    await this.page.getByTestId('password-input').fill(credentials.password);
-    await this.page.getByTestId('login-btn').click();
-    await this.page.waitForURL('**/dashboard');
-  }
-}
-```
-
-## Integration with Locator Map
-
-### Using Generated Locator Map
-
-Leverage the generated map from `output/locatorMap.ts`:
-
-```typescript
-import { locatorMap } from '../output/locatorMap';
-
-class DirectLocatorPage {
-  constructor(private page: Page) {}
-
-  async interactWithElements() {
-    // Use locator map for direct access
-    await this.page.locator(locatorMap.dashboard.submit_btn).click();
-    await this.page.locator(locatorMap.dashboard.username_input).fill('test');
-
-    // Combine with dynamic selectors
-    const robustLocator = locatorMap.dashboard.user_row_template;
-    await this.page.locator(robustLocator.replace('{id}', '123')).click();
-  }
-}
-```
-
-## 🛠️ Configuration
-
-### Custom Vue Project Path
-
-```bash
-# Set default path in src/extractLocators.ts
-const vueProjectPath = process.argv[2] || './src'; // Your Vue project path
-```
-
-### Ignored Directories
-
-The tool automatically ignores:
-
-- `**/node_modules/**`
-- `**/dist/**`
-- `**/.output/**`
-- `**/build/**`
-
-## 🎯 Best Practices
-
-### 1. **Prioritize Robust Locators**
-
-- Use `data-testid` for interactive elements
-- Add unique `id` attributes where appropriate
-- Prefer semantic locators over class-based ones
-
-### 2. **Improve Fragile Locators**
-
-```vue
-<!-- BEFORE (Fragile) -->
-<button class="btn search-btn">Search</button>
-
-<!-- AFTER (Robust) -->
-<button data-testid="search-btn" class="btn search-btn">Search</button>
-```
-
-### 3. **Use Generated Page Objects**
-
-```typescript
-// Use robust Page Objects for critical test paths
-const robust = new RobustDashboardPage(page);
-await robust.performCriticalUserFlow();
-```
-
-### 4. **Locator Quality Assessment**
-
-Regular review of locator robustness:
-
-```typescript
-// Good: Robust, test-specific
-this.page.getByTestId('submit-form');
-
-// Better: Semantic and accessible
-this.page.getByRole('button', { name: 'Submit Form' });
-
-// Avoid: Fragile, dependent on styling
-this.page.locator('.btn.btn-primary.submit-button');
-
-// Last resort: XPath with clear documentation
-this.page.locator('//button[contains(text(),"Submit")][1]'); // FRAGILE: Consider adding data-testid
-```
-
-### 5. **Documentation Standards**
-
-Document complex locators and business logic:
-
-```typescript
-class DocumentedPage extends basePage {
-  /**
-   * Submits the user form after validation
-   * @param userData - User information to submit
-   * @requires User must be logged in and form must be visible
-   */
-  async submitUserForm(userData: UserData) {
-    await this.validateFormState();
-    await this.fillUserForm(userData);
-    await this.submitForm();
-    await this.waitForSubmissionComplete();
-  }
-
-  // Complex XPath with explanation
-  private get dynamicStatusIndicator() {
-    // XPath: Find status indicator that changes based on user state
-    // FRAGILE: Consider adding data-testid to status elements
-    return this.page.locator(
-      '//div[@class="status-indicator"][ancestor::div[@data-user-id]]'
-    );
-  }
-}
-```
-
-## 🤝 Contributing
-
-Feel free to submit issues and enhancement requests!
-
-## 📄 License
-
-MIT License - see LICENSE file for details.
+This enhanced functionality provides a solid foundation for testing modern Vue.js applications. Contributions for additional patterns, edge cases, and integration improvements are welcome!
