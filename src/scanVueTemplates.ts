@@ -39,7 +39,7 @@ interface CustomComponentWarning {
 interface ConstantDefinition {
   name: string;
   value: string;
-  type: 'role' | 'label' | 'testid' | 'other';
+  type: 'role' | 'label' | 'testid' | 'name' | 'placeholder' | 'other';
   file: string;
 }
 
@@ -76,6 +76,9 @@ const robustAttributes = [
   'data-test',
   'id',
   'name',
+  'role',
+  'aria-label',
+  'placeholder',
 ];
 
 // Vue directives that make elements dynamic or conditional
@@ -480,11 +483,25 @@ async function processTemplateContent(
       type: 'name' as const,
       selector: (val: string) => `[name="${val}"]`,
     },
+    // Vue dynamic name: :name="NAME_CONSTANT"
+    {
+      pattern: /:name="([^"]+)"/g,
+      type: 'name' as const,
+      selector: (val: string) => `[name="${val}"]`,
+      isDynamic: true,
+    },
     // placeholder text
     {
       pattern: /placeholder="([^"]+)"/g,
       type: 'placeholder' as const,
       selector: (val: string) => `[placeholder="${val}"]`,
+    },
+    // Vue dynamic placeholder: :placeholder="PLACEHOLDER_CONSTANT"
+    {
+      pattern: /:placeholder="([^"]+)"/g,
+      type: 'placeholder' as const,
+      selector: (val: string) => `[placeholder="${val}"]`,
+      isDynamic: true,
     },
     // aria-label for accessibility
     {
@@ -854,6 +871,10 @@ function extractConstants(content: string, filename: string): void {
     /const\s+([A-Z_]+)\s*=\s*['"`](button|link|textbox|heading|banner|navigation|main|complementary|contentinfo|search|form|dialog|alert|status|log|marquee|timer|alertdialog|application|article|cell|columnheader|definition|directory|document|group|img|list|listitem|math|note|presentation|region|row|rowgroup|rowheader|separator|slider|spinbutton|table|tablist|tab|tabpanel|toolbar|tooltip|tree|treegrid|treeitem)['"`]/g,
     // const SUBMIT_LABEL = 'Submit';
     /const\s+([A-Z_]+)\s*=\s*['"`]([A-Za-z0-9\s]+)['"`]/g,
+    // const USERNAME_NAME = 'username'; (form field names)
+    /const\s+([A-Z_]*(?:NAME|FIELD)[A-Z_]*)\s*=\s*['"`]([^'"`]+)['"`]/g,
+    // const EMAIL_PLACEHOLDER = 'Enter your email';
+    /const\s+([A-Z_]*(?:PLACEHOLDER|HINT)[A-Z_]*)\s*=\s*['"`]([^'"`]+)['"`]/g,
   ];
 
   for (const pattern of constPatterns) {
@@ -863,7 +884,8 @@ function extractConstants(content: string, filename: string): void {
       const constantValue = match[2];
 
       // Determine type based on name and value
-      let type: 'role' | 'label' | 'testid' | 'other' = 'other';
+      let type: 'role' | 'label' | 'testid' | 'name' | 'placeholder' | 'other' =
+        'other';
 
       if (
         constantName.includes('ROLE') ||
@@ -926,12 +948,28 @@ function extractConstants(content: string, filename: string): void {
         constantName.includes('TEST_ID')
       ) {
         type = 'testid';
+      } else if (
+        constantName.includes('NAME') ||
+        constantName.includes('FIELD')
+      ) {
+        type = 'name';
+      } else if (
+        constantName.includes('PLACEHOLDER') ||
+        constantName.includes('HINT')
+      ) {
+        type = 'placeholder';
       }
 
       constantsRegistry.set(constantName, {
         name: constantName,
         value: constantValue,
-        type,
+        type: type as
+          | 'role'
+          | 'label'
+          | 'testid'
+          | 'name'
+          | 'placeholder'
+          | 'other',
         file: filename,
       });
 

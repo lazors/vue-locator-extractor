@@ -116,13 +116,42 @@ const vueProjectPath = process.argv[2] || './test-vue-src';
                 playwrightMethod = `this.page.getByLabel('${info.rawValue}')`;
                 break;
               case 'role':
-                playwrightMethod = `this.page.getByRole('${info.rawValue}')`;
+                // Use getByRole with proper options for common interactive roles
+                const commonInteractiveRoles = [
+                  'button',
+                  'link',
+                  'textbox',
+                  'combobox',
+                  'listbox',
+                  'checkbox',
+                  'radio',
+                  'tab',
+                  'menuitem',
+                ];
+                if (
+                  commonInteractiveRoles.includes(info.rawValue.toLowerCase())
+                ) {
+                  playwrightMethod = `this.page.getByRole('${info.rawValue}')`;
+                } else {
+                  // For structural roles, use getByRole with name option if available
+                  playwrightMethod = `this.page.getByRole('${info.rawValue}')`;
+                }
                 break;
               case 'placeholder':
                 playwrightMethod = `this.page.getByPlaceholder('${info.rawValue}')`;
                 break;
               case 'name':
-                playwrightMethod = `this.page.locator('[name="${info.rawValue}"]')`;
+                // For form elements, prefer getByLabel if we can infer it's a form field
+                const formElements = ['input', 'textarea', 'select'];
+                if (
+                  info.element &&
+                  formElements.includes(info.element.toLowerCase())
+                ) {
+                  // Use getByLabel if there's likely an associated label, otherwise use name locator
+                  playwrightMethod = `this.page.getByLabel('${info.rawValue}')`;
+                } else {
+                  playwrightMethod = `this.page.locator('[name="${info.rawValue}"]')`;
+                }
                 break;
               case 'class':
                 playwrightMethod = `this.page.locator('${info.selector}')`;
