@@ -7,7 +7,21 @@ const vueProjectPath = process.argv[2] || './test-vue-src';
 (async () => {
   try {
     const absPath = path.resolve(vueProjectPath);
+    console.log(`🔍 Scanning for Vue files in: ${absPath}`);
+
     const { groupedLocators, warnings } = await extractLocatorsFromVue(absPath);
+
+    console.log(`\n📁 Files found and processed:`);
+    Object.entries(groupedLocators).forEach(([file, locators]) => {
+      console.log(`   📄 ${file} - ${Object.keys(locators).length} locators`);
+      Object.entries(locators).forEach(([key, info]) => {
+        console.log(
+          `      ${info.robustness === 'robust' ? '✅' : '🔸'} ${key}: ${
+            info.type
+          }="${info.rawValue}"`
+        );
+      });
+    });
 
     // Separate robust and fragile locators
     const robustLocators: typeof groupedLocators = {};

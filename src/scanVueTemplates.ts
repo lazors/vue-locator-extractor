@@ -162,6 +162,12 @@ export async function extractLocatorsFromVue(baseDir: string) {
     ],
   });
 
+  console.log(`🔍 Found ${templateFiles.length} Vue files:`);
+  templateFiles.forEach((file) => {
+    const relative = path.relative(baseDir, file);
+    console.log(`   📄 ${relative}`);
+  });
+
   const groupedLocators: Record<string, Record<string, LocatorInfo>> = {};
   const warnings: string[] = [];
 
@@ -170,16 +176,22 @@ export async function extractLocatorsFromVue(baseDir: string) {
     const keyGroup = relative.replace(/\\/g, '/');
     const content = await fs.readFile(file, 'utf-8');
 
+    console.log(`\n🔍 Processing: ${relative}`);
+
     // Extract the <template> section from Vue files
     const templateMatch = content.match(
       /<template[^>]*>([\s\S]*?)<\/template>/
     );
     if (!templateMatch) {
       // Skip Vue files without <template> sections
+      console.log(`   ⚠️  No <template> section found, skipping`);
       continue;
     }
 
     const templateContent = templateMatch[1];
+    console.log(
+      `   ✅ Found <template> section (${templateContent.length} chars)`
+    );
 
     // Extract various locator patterns for Page Object Model
     const locatorPatterns = [
