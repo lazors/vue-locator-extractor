@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login Page</title>
+</head>
+<body>
+    <div class="login-container">
+        <h1 id="login-title">Login</h1>
+        
+        <form class="login-form" role="form">
+            <div class="form-group">
+                <label for="username">Username:</label>
+                <input 
+                    type="text" 
+                    id="username" 
+                    name="username" 
+                    data-testid="username-input"
+                    placeholder="Enter your username"
+                    class="form-input required"
+                />
+            </div>
+            
+            <div class="form-group">
+                <label for="password">Password:</label>
+                <input 
+                    type="password" 
+                    id="password" 
+                    name="password" 
+                    data-testid="password-input"
+                    placeholder="Enter your password"
+                    class="form-input required"
+                />
+            </div>
+            
+            <div class="form-actions">
+                <button 
+                    type="submit" 
+                    id="login-btn" 
+                    data-testid="login-button"
+                    class="btn btn-primary"
+                >
+                    Login
+                </button>
+                
+                <a 
+                    href="/forgot-password" 
+                    id="forgot-link"
+                    aria-label="Forgot password link"
+                    class="link secondary"
+                >
+                    Forgot Password?
+                </a>
+            </div>
+        </form>
+        
+        <div class="error-message" id="error-display" role="alert" aria-label="Error message">
+            <!-- Error messages will be displayed here -->
+        </div>
+        
+        <div class="social-login">
+            <button class="social-btn google" data-testid="google-login">
+                Sign in with Google
+            </button>
+            <button class="social-btn facebook" data-testid="facebook-login">
+                Sign in with Facebook
+            </button>
+        </div>
+    </div>
+</body>
+</html> 
