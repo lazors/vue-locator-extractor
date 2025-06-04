@@ -181,21 +181,39 @@ function classifyElement(
   robustness: 'robust' | 'fragile';
   testRelevance: 'high' | 'medium' | 'low';
 } {
-  // Check if element has robust attributes
+  // Enhanced: Check if element can use any Playwright getBy methods
   const hasRobustAttribute = robustAttributes.some((attr) => attributes[attr]);
 
-  // Special case for XPath locators targeting interactive elements
-  let robustness: 'robust' | 'fragile' = hasRobustAttribute
+  // Additional getBy* method compatible attributes that should be considered robust
+  const getByCompatibleAttributes = [
+    'data-testid', // getByTestId()
+    'data-test-id', // getByTestId()
+    'data-test', // getByTestId()
+    'id', // locator() but considered stable
+    'name', // getByLabel() for form elements, locator() for others
+    'role', // getByRole()
+    'aria-label', // getByLabel()
+    'placeholder', // getByPlaceholder()
+    'title', // getByTitle()
+    'alt', // getByAltText()
+  ];
+
+  // Check if element has any getBy* compatible attributes
+  const hasGetByCompatible = getByCompatibleAttributes.some(
+    (attr) => attributes[attr] && attributes[attr].trim()
+  );
+
+  let robustness: 'robust' | 'fragile' = hasGetByCompatible
     ? 'robust'
     : 'fragile';
 
-  // Check for robust patterns in XPath and class attributes
-  if (!hasRobustAttribute) {
+  // Special handling for specific cases
+  if (!hasGetByCompatible) {
     const xpathValue = attributes['data-xpath'] || attributes['xpath'];
     const classValue = attributes['class'] || '';
 
     if (xpathValue) {
-      // XPath targeting input, button, or btn elements is considered robust
+      // Enhanced XPath robustness detection - text-based locators for buttons are robust
       const robustXPathPatterns = [
         /\/\/input/i, // //input[@name='search']
         /\/\/button/i, // //button[contains(@class,'submit')]
@@ -203,10 +221,26 @@ function classifyElement(
         /button\[/i, // //div//button[text()='Submit']
         /input\[/i, // //form//input[@type='text']
         /btn/i, // Any XPath containing 'btn' (e.g., //div[contains(@class,'submit-btn')])
+        /contains\(text\(\)/i, // XPath with text content - robust for getByText equivalent
+        /text\(\)=/i, // Direct text matching - robust for getByText equivalent
       ];
 
-      if (robustXPathPatterns.some((pattern) => pattern.test(xpathValue))) {
+      // Additional robustness for interactive elements with text content
+      const isInteractiveElementWithText =
+        ['button', 'a', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6'].includes(element) &&
+        /contains\(text\(\)|text\(\)=/i.test(xpathValue);
+
+      if (
+        robustXPathPatterns.some((pattern) => pattern.test(xpathValue)) ||
+        isInteractiveElementWithText
+      ) {
         robustness = 'robust';
+        console.log(
+          `   🎯 XPath classified as robust: ${xpathValue.substring(
+            0,
+            50
+          )}... (text-based or interactive)`
+        );
       }
     }
 
@@ -216,7 +250,7 @@ function classifyElement(
     }
   }
 
-  // Determine test relevance
+  // Determine test relevance based on element type and attributes
   let testRelevance: 'high' | 'medium' | 'low' = 'low';
 
   if (testRelevantElements.has(element)) {
@@ -236,6 +270,11 @@ function classifyElement(
     else {
       testRelevance = 'medium';
     }
+  }
+
+  // Elements with getBy* compatible attributes get higher relevance
+  if (hasGetByCompatible && testRelevance === 'low') {
+    testRelevance = 'medium';
   }
 
   // Check for decorative indicators (lower relevance)
@@ -393,271 +432,117 @@ export async function extractLocatorsFromVue(baseDir: string) {
   return { groupedLocators, warnings, customComponentWarnings };
 }
 
-async function processTemplateContent(
-  templateContent: string,
-  keyGroup: string,
-  groupedLocators: Record<string, Record<string, LocatorInfo>>,
-  warnings: string[],
-  customComponentWarnings: CustomComponentWarning[],
-  filename: string
-) {
-  // Check for custom components first
-  const customComponentMatches = templateContent.matchAll(
-    /<([A-Z][a-zA-Z0-9-]*)[^>]*>/g
-  );
-  for (const match of customComponentMatches) {
-    const componentName = match[1];
-    const context = analyzeElementContext(templateContent, match.index || 0);
+/**
+ * Normalize template content for better parsing
+ */
+function normalizeTemplateForParsing(templateContent: string): string {
+  let normalized = templateContent
+    // Remove Vue comments but preserve structure
+    .replace(/<!--[\s\S]*?-->/g, '')
+    // Preserve single spaces around attributes - don't collapse to nothing
+    .replace(/\s*\n\s*/g, ' ')
+    // Normalize excessive whitespace but keep single spaces
+    .replace(/\s{2,}/g, ' ')
+    // Keep proper attribute formatting - don't insert spaces in attribute names
+    .replace(/\s*=\s*/g, '=')
+    // Ensure space before attributes but don't break attribute names
+    .replace(/([>\s])([a-zA-Z:-]+)=/g, '$1 $2=');
 
-    customComponentWarnings.push({
-      file: filename,
-      component: componentName,
-      line: context.lineNumber,
-      message: `Custom component <${componentName}> at line ${context.lineNumber} — locator not extracted. Review component source or ensure it passes data-testid down to root element.`,
-    });
+  return normalized.trim();
+}
+
+/**
+ * Extract base from template literal for partial matching
+ */
+function extractTemplateLiteralBase(value: string): string {
+  // Extract the static part before ${...}
+  const beforeTemplate = value.split('${')[0];
+  if (beforeTemplate) {
+    return beforeTemplate;
   }
 
-  // Extract various locator patterns for Page Object Model
-  const locatorPatterns = [
-    // data-testid (preferred for testing)
+  // Extract the static part after ${...}
+  const afterTemplate = value.split('}').pop();
+  if (afterTemplate) {
+    return afterTemplate;
+  }
+
+  return value;
+}
+
+/**
+ * Enhanced element extraction with better multi-line and Vue support
+ */
+const extractElementWithAttributesEnhanced = (
+  match: RegExpMatchArray,
+  content: string
+): {
+  element: string;
+  attributes: Record<string, string> & { fullAttributeString?: string };
+} => {
+  const matchIndex = match.index || 0;
+
+  // Look backwards to find the opening tag - enhanced for multi-line
+  let tagStart = matchIndex;
+  let depth = 0;
+  while (tagStart > 0) {
+    const char = content[tagStart];
+    if (char === '>') depth++;
+    if (char === '<') {
+      if (depth === 0) break;
+      depth--;
+    }
+    tagStart--;
+  }
+
+  // Look forwards to find the closing > - enhanced for multi-line
+  let tagEnd = matchIndex;
+  depth = 0;
+  while (tagEnd < content.length) {
+    const char = content[tagEnd];
+    if (char === '<') depth++;
+    if (char === '>') {
+      if (depth === 0) break;
+      depth--;
+    }
+    tagEnd++;
+  }
+
+  const tagContent = content.substring(tagStart, tagEnd + 1);
+
+  // Enhanced regex to handle Vue components and self-closing tags
+  const tagMatch = tagContent.match(/<([a-zA-Z][a-zA-Z0-9-]*)[^>]*\/?>/s);
+
+  if (!tagMatch) return { element: 'element', attributes: {} };
+
+  const element = tagMatch[1];
+  const attributeString = tagContent.substring(element.length + 1, -1);
+
+  // Enhanced attribute parsing with better Vue directive support
+  const attributes: Record<string, string> & { fullAttributeString?: string } =
     {
-      pattern: /data-testid="([^"]+)"/g,
-      type: 'data-testid' as const,
-      selector: (val: string) => `[data-testid="${val}"]`,
-    },
-    // Vue dynamic data-testid: :data-testid="CONSTANT"
-    {
-      pattern: /:data-testid="([^"]+)"/g,
-      type: 'data-testid' as const,
-      selector: (val: string) => `[data-testid="${val}"]`,
-      isDynamic: true,
-    },
-    // data-test-id (alternative testing attribute)
-    {
-      pattern: /data-test-id="([^"]+)"/g,
-      type: 'data-test-id' as const,
-      selector: (val: string) => `[data-test-id="${val}"]`,
-    },
-    // Vue dynamic data-test-id: :data-test-id="CONSTANT"
-    {
-      pattern: /:data-test-id="([^"]+)"/g,
-      type: 'data-test-id' as const,
-      selector: (val: string) => `[data-test-id="${val}"]`,
-      isDynamic: true,
-    },
-    // data-test (alternative testing attribute)
-    {
-      pattern: /data-test="([^"]+)"/g,
-      type: 'data-test' as const,
-      selector: (val: string) => `[data-test="${val}"]`,
-    },
-    // Vue dynamic data-test: :data-test="CONSTANT"
-    {
-      pattern: /:data-test="([^"]+)"/g,
-      type: 'data-test' as const,
-      selector: (val: string) => `[data-test="${val}"]`,
-      isDynamic: true,
-    },
-    // id attributes
-    {
-      pattern: /id="([^"]+)"/g,
-      type: 'id' as const,
-      selector: (val: string) => `#${val}`,
-    },
-    // class attributes (extract individual classes)
-    {
-      pattern: /class="([^"]+)"/g,
-      type: 'class' as const,
-      selector: (val: string) => {
-        // Sanitize complex Vue expressions and dynamic class bindings
-        if (val.includes('[') || val.includes('{{') || val.includes('${')) {
-          // Skip complex expressions that can't be converted to valid CSS selectors
-          return null;
-        }
-        return `.${val.split(/\s+/).join('.')}`;
-      },
-    },
-    // name attributes (for form elements)
-    {
-      pattern: /name="([^"]+)"/g,
-      type: 'name' as const,
-      selector: (val: string) => `[name="${val}"]`,
-    },
-    // Vue dynamic name: :name="NAME_CONSTANT"
-    {
-      pattern: /:name="([^"]+)"/g,
-      type: 'name' as const,
-      selector: (val: string) => `[name="${val}"]`,
-      isDynamic: true,
-    },
-    // placeholder text
-    {
-      pattern: /placeholder="([^"]+)"/g,
-      type: 'placeholder' as const,
-      selector: (val: string) => `[placeholder="${val}"]`,
-    },
-    // Vue dynamic placeholder: :placeholder="PLACEHOLDER_CONSTANT"
-    {
-      pattern: /:placeholder="([^"]+)"/g,
-      type: 'placeholder' as const,
-      selector: (val: string) => `[placeholder="${val}"]`,
-      isDynamic: true,
-    },
-    // aria-label for accessibility
-    {
-      pattern: /aria-label="([^"]+)"/g,
-      type: 'aria-label' as const,
-      selector: (val: string) => `[aria-label="${val}"]`,
-    },
-    // Vue dynamic aria-label: :aria-label="LABEL_CONSTANT"
-    {
-      pattern: /:aria-label="([^"]+)"/g,
-      type: 'aria-label' as const,
-      selector: (val: string) => `[aria-label="${val}"]`,
-      isDynamic: true,
-    },
-    // role attributes
-    {
-      pattern: /role="([^"]+)"/g,
-      type: 'role' as const,
-      selector: (val: string) => `[role="${val}"]`,
-    },
-    // Vue dynamic role: :role="ROLE_CONSTANT"
-    {
-      pattern: /:role="([^"]+)"/g,
-      type: 'role' as const,
-      selector: (val: string) => `[role="${val}"]`,
-      isDynamic: true,
-    },
-    // xpath attributes (custom XPath expressions)
-    {
-      pattern: /data-xpath="([^"]+)"/g,
-      type: 'xpath' as const,
-      selector: (val: string) => val,
-    },
-    // Alternative xpath attribute syntax
-    {
-      pattern: /xpath="([^"]+)"/g,
-      type: 'xpath' as const,
-      selector: (val: string) => val,
-    },
+      fullAttributeString: attributeString,
+    };
+
+  // Parse all attribute patterns including Vue directives
+  const attributePatterns = [
+    // Standard attributes: name="value"
+    /(\w+(?:-\w+)*)\s*=\s*["']([^"']*)["']/g,
+    // Vue dynamic attributes: :name="value" or v-bind:name="value"
+    /([@:][\w-]+|v-bind:[\w-]+|v-on:[\w-]+)\s*=\s*["']([^"']*)["']/g,
+    // Vue directives without values: v-if, v-show, etc.
+    /(v-[\w-]+)(?:\s|>|$)/g,
   ];
 
-  for (const {
-    pattern,
-    type,
-    selector,
-    isDynamic: patternIsDynamic,
-  } of locatorPatterns) {
-    const matches = [...templateContent.matchAll(pattern)];
-
-    for (const match of matches) {
-      let rawValue = match[1];
-      let resolvedFromConstant: string | undefined;
-
-      // Try to resolve constant references
-      const { resolved, constantName } = resolveConstantReference(rawValue);
-      if (constantName) {
-        resolvedFromConstant = `${constantName} → ${resolved}`;
-        rawValue = resolved;
-        console.log(
-          `   🔧 Resolved constant: ${constantName} → "${resolved}" for ${type}`
-        );
-      }
-
-      const context = analyzeElementContext(templateContent, match.index || 0);
-      const { element, attributes } = extractElementWithAttributes(
-        match,
-        templateContent
-      );
-
-      // Add resolvedFromConstant to attributes for tracking
-      if (resolvedFromConstant) {
-        attributes.resolvedFromConstant = resolvedFromConstant;
-      }
-
-      // Detect Vue directives
-      const { directives, isDynamic, isConditional } = detectVueDirectives(
-        attributes.fullAttributeString || ''
-      );
-
-      // Mark as dynamic if it was a Vue dynamic attribute (e.g., :role)
-      const finalIsDynamic = isDynamic || patternIsDynamic || false;
-
-      // Check if this is a custom component
-      const customComponent = isCustomComponent(element);
-
-      // Generate the selector
-      const selectorResult = selector(rawValue);
-
-      // Skip if selector generation failed
-      if (selectorResult === null) {
-        continue;
-      }
-
-      // Classify element
-      const { robustness, testRelevance } = classifyElement(
-        element,
-        attributes
-      );
-
-      // Skip low relevance elements unless they're in dynamic contexts
-      if (testRelevance === 'low' && !finalIsDynamic && !isConditional) {
-        continue;
-      }
-
-      // Generate enhanced warnings
-      let warning: string | undefined;
-      if (robustness === 'fragile' && testRelevance === 'high') {
-        warning = generateFragileWarning(element, rawValue, type);
-
-        // Add dynamic/conditional context to warning
-        if (finalIsDynamic) {
-          warning += ` | Element may be repeated (v-for detected)`;
-        }
-        if (isConditional) {
-          warning += ` | Element may not always be present (conditional rendering detected)`;
-        }
-
-        warnings.push(`${keyGroup}: ${warning}`);
-      }
-
-      // Generate enhanced key
-      let key = generateEnhancedKey(
-        rawValue,
-        type,
-        finalIsDynamic,
-        isConditional
-      );
-
-      // Ensure unique keys
-      let uniqueKey = key;
-      let counter = 1;
-      while (groupedLocators[keyGroup]?.[uniqueKey]) {
-        uniqueKey = `${key}_${counter}`;
-        counter++;
-      }
-
-      if (!groupedLocators[keyGroup]) groupedLocators[keyGroup] = {};
-
-      groupedLocators[keyGroup][uniqueKey] = {
-        selector: selectorResult,
-        type,
-        element,
-        rawValue,
-        robustness,
-        testRelevance,
-        warning,
-        isDynamic: finalIsDynamic,
-        isConditional,
-        vueDirectives: directives,
-        customComponent,
-        parentContext: context.parentContext,
-        resolvedFromConstant,
-      };
+  for (const pattern of attributePatterns) {
+    const matches = [...attributeString.matchAll(pattern)];
+    for (const attrMatch of matches) {
+      attributes[attrMatch[1]] = attrMatch[2] || '';
     }
   }
-}
+
+  return { element, attributes };
+};
 
 async function processJavaScriptContent(
   content: string,
@@ -803,59 +688,6 @@ function generateEnhancedKey(
 
   return key;
 }
-
-// Enhanced element extraction function
-const extractElementWithAttributes = (
-  match: RegExpMatchArray,
-  content: string
-): {
-  element: string;
-  attributes: Record<string, string> & { fullAttributeString?: string };
-} => {
-  const matchIndex = match.index || 0;
-
-  // Find the opening tag
-  let tagStart = matchIndex;
-  while (tagStart > 0 && content[tagStart] !== '<') {
-    tagStart--;
-  }
-
-  let tagEnd = matchIndex;
-  while (tagEnd < content.length && content[tagEnd] !== '>') {
-    tagEnd++;
-  }
-
-  const tagContent = content.substring(tagStart, tagEnd + 1);
-  const tagMatch = tagContent.match(/<(\w+)([^>]*)>/);
-
-  if (!tagMatch) return { element: 'element', attributes: {} };
-
-  const element = tagMatch[1];
-  const attributeString = tagMatch[2];
-
-  // Parse attributes (enhanced to capture Vue directives)
-  const attributes: Record<string, string> & { fullAttributeString?: string } =
-    {
-      fullAttributeString: attributeString,
-    };
-
-  const attrMatches = attributeString.matchAll(
-    /(\w+(?:-\w+)*|[@:]\w+(?:-\w+)*)="([^"]*)"/g
-  );
-  for (const attrMatch of attrMatches) {
-    attributes[attrMatch[1]] = attrMatch[2];
-  }
-
-  // Also capture Vue directives without values
-  const directiveMatches = attributeString.matchAll(
-    /(v-[\w-]+|@\w+|:\w+)(?:\s|>|$)/g
-  );
-  for (const directiveMatch of directiveMatches) {
-    attributes[directiveMatch[1]] = '';
-  }
-
-  return { element, attributes };
-};
 
 /**
  * Extract constant definitions from JavaScript/TypeScript content
@@ -1019,4 +851,603 @@ function resolveConstantReference(value: string): {
   }
 
   return { resolved: value };
+}
+
+/**
+ * Detect interactive elements that lack proper test attributes (fallback strategy)
+ */
+async function detectElementsWithoutTestAttributes(
+  templateContent: string,
+  keyGroup: string,
+  groupedLocators: Record<string, Record<string, LocatorInfo>>,
+  warnings: string[],
+  filename: string
+) {
+  // Target elements that should have test attributes
+  const interactiveElementPatterns = [
+    // Buttons
+    /<(button)[^>]*>([^<]*)<\/button>/gs,
+    /<(input)[^>]*type\s*=\s*["'](button|submit|reset)["'][^>]*>/gs,
+    // Input fields
+    /<(input)[^>]*(?!type\s*=\s*["'](button|submit|reset)["'])[^>]*>/gs,
+    /<(textarea)[^>]*>[^<]*<\/textarea>/gs,
+    /<(select)[^>]*>[^<]*<\/select>/gs,
+    // Links that could be interactive
+    /<(a)[^>]*href[^>]*>([^<]*)<\/a>/gs,
+    // Headers (important for navigation)
+    /<(h[1-6])[^>]*>([^<]*)<\/h[1-6]>/gs,
+  ];
+
+  for (const pattern of interactiveElementPatterns) {
+    const matches = [...templateContent.matchAll(pattern)];
+
+    for (const match of matches) {
+      const fullElement = match[0];
+      const elementType = match[1];
+      const textContent = match[2] || '';
+
+      // Check if this element already has test attributes
+      const hasTestAttribute = robustAttributes.some(
+        (attr) =>
+          fullElement.includes(`${attr}=`) ||
+          fullElement.includes(`:${attr}=`) ||
+          fullElement.includes(`v-bind:${attr}=`)
+      );
+
+      // Skip if already has test attributes
+      if (hasTestAttribute) continue;
+
+      // Extract basic attributes for XPath generation
+      const context = analyzeElementContext(templateContent, match.index || 0);
+      const { element, attributes } = extractElementWithAttributesEnhanced(
+        match,
+        templateContent
+      );
+
+      // Generate XPath as fallback locator
+      const xpath = generateFallbackXPath(
+        element,
+        attributes,
+        textContent.trim()
+      );
+
+      if (!xpath) continue;
+
+      // Detect Vue directives
+      const { directives, isDynamic, isConditional } = detectVueDirectives(
+        attributes.fullAttributeString || ''
+      );
+
+      // Create fallback locator entry
+      const key = generateEnhancedKey(xpath, 'xpath', isDynamic, isConditional);
+
+      // Check if we already found this xpath
+      if (groupedLocators[keyGroup]?.[key]) continue;
+
+      // Use classifyElement to properly determine robustness instead of hardcoding as fragile
+      const xpathAttributes = { ...attributes, xpath: xpath };
+      const { robustness, testRelevance } = classifyElement(
+        element,
+        xpathAttributes
+      );
+
+      const locatorInfo: LocatorInfo = {
+        selector: xpath,
+        type: 'xpath',
+        element,
+        rawValue: xpath,
+        robustness,
+        testRelevance,
+        warning:
+          robustness === 'fragile'
+            ? `FRAGILE LOCATOR WARNING: ${element}${
+                textContent ? ` with text="${textContent}"` : ''
+              } lacks stable test attributes. Consider adding data-testid="${generateSuggestedTestId(
+                element,
+                textContent
+              )}" | Alternative: data-test-id="${generateSuggestedTestId(
+                element,
+                textContent
+              )}" | Alternative: data-test="${generateSuggestedTestId(
+                element,
+                textContent
+              )}" | Or add a unique id="${generateSuggestedTestId(
+                element,
+                textContent
+              )}"`
+            : undefined,
+        isDynamic,
+        isConditional,
+        vueDirectives: directives,
+        customComponent: isCustomComponent(element),
+        parentContext: context.parentContext,
+      };
+
+      groupedLocators[keyGroup] = groupedLocators[keyGroup] || {};
+      groupedLocators[keyGroup][key] = locatorInfo;
+
+      // Log discovery with proper status icon
+      const statusIcon = robustness === 'robust' ? '✅' : '🔸';
+      const dynamicFlag = isDynamic ? ' [DYNAMIC]' : '';
+      const conditionalFlag = isConditional ? ' [CONDITIONAL]' : '';
+      const contextFlag = context.parentContext
+        ? ` (${context.parentContext})`
+        : '';
+
+      console.log(
+        `      ${statusIcon} ${key}: xpath="${xpath.substring(
+          0,
+          60
+        )}..."${dynamicFlag}${conditionalFlag}${contextFlag}`
+      );
+    }
+  }
+}
+
+/**
+ * Generate fallback XPath for elements without test attributes
+ */
+function generateFallbackXPath(
+  element: string,
+  attributes: Record<string, string>,
+  textContent: string
+): string | null {
+  const parts: string[] = [];
+
+  // Start with element type
+  parts.push(`//${element}`);
+
+  // Add attribute-based conditions (prioritize stable attributes)
+  const conditions: string[] = [];
+
+  // Use class if present and not too generic
+  if (
+    attributes.class &&
+    !attributes.class.includes('{') &&
+    attributes.class.split(' ').length <= 3
+  ) {
+    const classes = attributes.class.split(' ').filter((cls) => cls.length > 2);
+    if (classes.length > 0) {
+      conditions.push(`contains(@class,'${classes[0]}')`);
+    }
+  }
+
+  // Use text content for buttons, links, headers
+  if (
+    textContent &&
+    ['button', 'a', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6'].includes(element)
+  ) {
+    const cleanText = textContent.replace(/['"]/g, '').substring(0, 30);
+    if (cleanText) {
+      conditions.push(`contains(text(),'${cleanText}')`);
+    }
+  }
+
+  // Use type for inputs
+  if (element === 'input' && attributes.type) {
+    conditions.push(`@type='${attributes.type}'`);
+  }
+
+  // Use placeholder for inputs/textareas
+  if (attributes.placeholder && !attributes.placeholder.includes('{')) {
+    conditions.push(`@placeholder='${attributes.placeholder}'`);
+  }
+
+  // Use href for links (but only if it's not dynamic)
+  if (
+    element === 'a' &&
+    attributes.href &&
+    !attributes.href.includes('{') &&
+    !attributes.href.includes('$')
+  ) {
+    conditions.push(`@href='${attributes.href}'`);
+  }
+
+  // Return null if no meaningful conditions found
+  if (conditions.length === 0) {
+    return null;
+  }
+
+  // Combine conditions
+  if (conditions.length === 1) {
+    return `${parts[0]}[${conditions[0]}]`;
+  } else {
+    return `${parts[0]}[${conditions.join(' and ')}]`;
+  }
+}
+
+/**
+ * Generate suggested test ID based on element and content
+ */
+function generateSuggestedTestId(element: string, textContent: string): string {
+  // Clean and normalize text content
+  const cleanText = textContent
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, '')
+    .replace(/\s+/g, '-')
+    .substring(0, 20);
+
+  if (cleanText) {
+    return `${cleanText}-${element}`;
+  }
+
+  // Fallback based on element type
+  const elementSuggestions = {
+    button: 'button',
+    input: 'input',
+    textarea: 'textarea',
+    select: 'select',
+    a: 'link',
+    h1: 'heading',
+    h2: 'heading',
+    h3: 'heading',
+    h4: 'heading',
+    h5: 'heading',
+    h6: 'heading',
+  };
+
+  return (
+    elementSuggestions[element as keyof typeof elementSuggestions] || element
+  );
+}
+
+/**
+ * Get test relevance for element type
+ */
+function getElementTestRelevance(element: string): 'high' | 'medium' | 'low' {
+  const highRelevance = ['button', 'input', 'textarea', 'select', 'a'];
+  const mediumRelevance = ['h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'form'];
+
+  if (highRelevance.includes(element)) return 'high';
+  if (mediumRelevance.includes(element)) return 'medium';
+  return 'low';
+}
+
+/**
+ * Enhanced template parsing with better multi-line and Vue directive support
+ */
+async function processTemplateContent(
+  templateContent: string,
+  keyGroup: string,
+  groupedLocators: Record<string, Record<string, LocatorInfo>>,
+  warnings: string[],
+  customComponentWarnings: CustomComponentWarning[],
+  filename: string
+) {
+  // Debug: Show what we're working with
+  console.log(
+    `   🔍 Processing template content (${templateContent.length} chars)...`
+  );
+
+  // Check for custom components first
+  const customComponentMatches = templateContent.matchAll(
+    /<([A-Z][a-zA-Z0-9-]*)[^>]*>/g
+  );
+  for (const match of customComponentMatches) {
+    const componentName = match[1];
+    const context = analyzeElementContext(templateContent, match.index || 0);
+
+    customComponentWarnings.push({
+      file: filename,
+      component: componentName,
+      line: context.lineNumber,
+      message: `Custom component <${componentName}> at line ${context.lineNumber} — locator not extracted. Review component source or ensure it passes data-testid down to root element.`,
+    });
+  }
+
+  // Enhanced: Pre-process template to handle multi-line elements and normalize whitespace
+  const normalizedTemplate = normalizeTemplateForParsing(templateContent);
+
+  // Debug: Show a sample of the normalized content
+  console.log(
+    `   🔧 Normalized template (${
+      normalizedTemplate.length
+    } chars, sample): ${normalizedTemplate.substring(0, 200)}...`
+  );
+
+  // Enhanced locator patterns with better regex support
+  const locatorPatterns = [
+    // Static data-testid patterns - more flexible
+    {
+      pattern: /data-testid\s*=\s*["']([^"']+)["']/gis,
+      type: 'data-testid' as const,
+      selector: (val: string) => `[data-testid="${val}"]`,
+    },
+    // Vue dynamic data-testid patterns - more flexible
+    {
+      pattern: /:data-testid\s*=\s*["']([^"']+)["']/gis,
+      type: 'data-testid' as const,
+      selector: (val: string) => `[data-testid="${val}"]`,
+      isDynamic: true,
+    },
+    {
+      pattern: /v-bind:data-testid\s*=\s*["']([^"']+)["']/gis,
+      type: 'data-testid' as const,
+      selector: (val: string) => `[data-testid="${val}"]`,
+      isDynamic: true,
+    },
+    // Template literal data-testid patterns - backticks
+    {
+      pattern: /:data-testid\s*=\s*[`]([^`]*)[`]/gis,
+      type: 'data-testid' as const,
+      selector: (val: string) =>
+        val.includes('${')
+          ? `[data-testid*="${extractTemplateLiteralBase(val)}"]`
+          : `[data-testid="${val}"]`,
+      isDynamic: true,
+    },
+    // data-test-id patterns
+    {
+      pattern: /data-test-id\s*=\s*["']([^"']+)["']/gis,
+      type: 'data-test-id' as const,
+      selector: (val: string) => `[data-test-id="${val}"]`,
+    },
+    {
+      pattern: /:data-test-id\s*=\s*["']([^"']+)["']/gis,
+      type: 'data-test-id' as const,
+      selector: (val: string) => `[data-test-id="${val}"]`,
+      isDynamic: true,
+    },
+    // data-test patterns
+    {
+      pattern: /data-test\s*=\s*["']([^"']+)["']/gis,
+      type: 'data-test' as const,
+      selector: (val: string) => `[data-test="${val}"]`,
+    },
+    {
+      pattern: /:data-test\s*=\s*["']([^"']+)["']/gis,
+      type: 'data-test' as const,
+      selector: (val: string) => `[data-test="${val}"]`,
+      isDynamic: true,
+    },
+    // id patterns - enhanced
+    {
+      pattern: /\bid\s*=\s*["']([^"']+)["']/gis,
+      type: 'id' as const,
+      selector: (val: string) => `#${val}`,
+    },
+    {
+      pattern: /:id\s*=\s*["']([^"']+)["']/gis,
+      type: 'id' as const,
+      selector: (val: string) => `#${val}`,
+      isDynamic: true,
+    },
+    // Template literal id patterns
+    {
+      pattern: /:id\s*=\s*[`]([^`]*)[`]/gis,
+      type: 'id' as const,
+      selector: (val: string) =>
+        val.includes('${')
+          ? `[id*="${extractTemplateLiteralBase(val)}"]`
+          : `#${val}`,
+      isDynamic: true,
+    },
+    // class patterns - enhanced
+    {
+      pattern: /\bclass\s*=\s*["']([^"']+)["']/gis,
+      type: 'class' as const,
+      selector: (val: string) => {
+        // Skip complex Vue expressions
+        if (
+          val.includes('[') ||
+          val.includes('{{') ||
+          val.includes('${') ||
+          val.includes('{')
+        ) {
+          return null;
+        }
+        return `.${val.split(/\s+/).join('.')}`;
+      },
+    },
+    // name patterns - enhanced
+    {
+      pattern: /\bname\s*=\s*["']([^"']+)["']/gis,
+      type: 'name' as const,
+      selector: (val: string) => `[name="${val}"]`,
+    },
+    {
+      pattern: /:name\s*=\s*["']([^"']+)["']/gis,
+      type: 'name' as const,
+      selector: (val: string) => `[name="${val}"]`,
+      isDynamic: true,
+    },
+    // Template literal name patterns
+    {
+      pattern: /:name\s*=\s*[`]([^`]*)[`]/gis,
+      type: 'name' as const,
+      selector: (val: string) =>
+        val.includes('${')
+          ? `[name*="${extractTemplateLiteralBase(val)}"]`
+          : `[name="${val}"]`,
+      isDynamic: true,
+    },
+    // placeholder patterns - enhanced
+    {
+      pattern: /placeholder\s*=\s*["']([^"']+)["']/gis,
+      type: 'placeholder' as const,
+      selector: (val: string) => `[placeholder="${val}"]`,
+    },
+    {
+      pattern: /:placeholder\s*=\s*["']([^"']+)["']/gis,
+      type: 'placeholder' as const,
+      selector: (val: string) => `[placeholder="${val}"]`,
+      isDynamic: true,
+    },
+    // aria-label patterns - enhanced
+    {
+      pattern: /aria-label\s*=\s*["']([^"']+)["']/gis,
+      type: 'aria-label' as const,
+      selector: (val: string) => `[aria-label="${val}"]`,
+    },
+    {
+      pattern: /:aria-label\s*=\s*["']([^"']+)["']/gis,
+      type: 'aria-label' as const,
+      selector: (val: string) => `[aria-label="${val}"]`,
+      isDynamic: true,
+    },
+    // role patterns - enhanced
+    {
+      pattern: /\brole\s*=\s*["']([^"']+)["']/gis,
+      type: 'role' as const,
+      selector: (val: string) => `[role="${val}"]`,
+    },
+    {
+      pattern: /:role\s*=\s*["']([^"']+)["']/gis,
+      type: 'role' as const,
+      selector: (val: string) => `[role="${val}"]`,
+      isDynamic: true,
+    },
+    // xpath patterns
+    {
+      pattern: /data-xpath\s*=\s*["']([^"']+)["']/gis,
+      type: 'xpath' as const,
+      selector: (val: string) => val,
+    },
+    {
+      pattern: /xpath\s*=\s*["']([^"']+)["']/gis,
+      type: 'xpath' as const,
+      selector: (val: string) => val,
+    },
+  ];
+
+  let totalMatches = 0;
+
+  for (const {
+    pattern,
+    type,
+    selector,
+    isDynamic: patternIsDynamic,
+  } of locatorPatterns) {
+    const matches = [...normalizedTemplate.matchAll(pattern)];
+    totalMatches += matches.length;
+
+    // Debug: Show what patterns are matching
+    if (matches.length > 0) {
+      console.log(`   🎯 Pattern ${type} found ${matches.length} matches`);
+    }
+
+    for (const match of matches) {
+      let rawValue = match[1];
+      let resolvedFromConstant: string | undefined;
+
+      // Try to resolve constant references
+      const { resolved, constantName } = resolveConstantReference(rawValue);
+      if (constantName) {
+        resolvedFromConstant = `${constantName} → ${resolved}`;
+        rawValue = resolved;
+        console.log(
+          `   🔧 Resolved constant: ${constantName} → "${resolved}" for ${type}`
+        );
+      }
+
+      // Enhanced element extraction with better multi-line support
+      const context = analyzeElementContext(
+        normalizedTemplate,
+        match.index || 0
+      );
+      const { element, attributes } = extractElementWithAttributesEnhanced(
+        match,
+        normalizedTemplate
+      );
+
+      // Add resolvedFromConstant to attributes for tracking
+      if (resolvedFromConstant) {
+        attributes.resolvedFromConstant = resolvedFromConstant;
+      }
+
+      // CRITICAL FIX: Add the current attribute to the attributes object so classifyElement can detect it
+      attributes[type] = rawValue;
+
+      // Detect Vue directives
+      const { directives, isDynamic, isConditional } = detectVueDirectives(
+        attributes.fullAttributeString || ''
+      );
+
+      // Mark as dynamic if it was a Vue dynamic attribute (e.g., :role)
+      const finalIsDynamic = isDynamic || patternIsDynamic || false;
+
+      // Check if this is a custom component
+      const customComponent = isCustomComponent(element);
+
+      // Generate the selector
+      const selectorResult = selector(rawValue);
+
+      // Skip if selector generation failed
+      if (selectorResult === null) {
+        continue;
+      }
+
+      // Classify the element
+      const { robustness, testRelevance } = classifyElement(
+        element,
+        attributes
+      );
+
+      // Generate a unique key
+      const key = generateEnhancedKey(
+        rawValue,
+        type,
+        finalIsDynamic,
+        isConditional
+      );
+
+      // Create warning for fragile locators
+      let warning: string | undefined;
+      if (robustness === 'fragile') {
+        warning = generateFragileWarning(element, rawValue, type);
+        if (finalIsDynamic) {
+          warning += ' | Element may be repeated (v-for detected)';
+        }
+        if (isConditional) {
+          warning +=
+            ' | Element may not always be present (conditional rendering detected)';
+        }
+      }
+
+      // Create the locator info
+      const locatorInfo: LocatorInfo = {
+        selector: selectorResult,
+        type,
+        element,
+        rawValue,
+        robustness,
+        testRelevance,
+        warning,
+        isDynamic: finalIsDynamic,
+        isConditional,
+        vueDirectives: directives,
+        customComponent,
+        parentContext: context.parentContext,
+        resolvedFromConstant,
+      };
+
+      groupedLocators[keyGroup] = groupedLocators[keyGroup] || {};
+      groupedLocators[keyGroup][key] = locatorInfo;
+
+      // Log discovery
+      const statusIcon = robustness === 'robust' ? '✅' : '🔸';
+      const dynamicFlag = finalIsDynamic ? ' [DYNAMIC]' : '';
+      const conditionalFlag = isConditional ? ' [CONDITIONAL]' : '';
+      const componentFlag = customComponent ? ' [CUSTOM COMPONENT]' : '';
+      const contextFlag = context.parentContext
+        ? ` (${context.parentContext})`
+        : '';
+
+      console.log(
+        `      ${statusIcon} ${key}: ${type}="${rawValue}"${dynamicFlag}${conditionalFlag}${componentFlag}${contextFlag}`
+      );
+    }
+  }
+
+  // Debug: Show total patterns found
+  console.log(`   📊 Total attribute matches found: ${totalMatches}`);
+
+  // Enhanced: Additional fallback detection for elements without test attributes
+  await detectElementsWithoutTestAttributes(
+    normalizedTemplate,
+    keyGroup,
+    groupedLocators,
+    warnings,
+    filename
+  );
 }
