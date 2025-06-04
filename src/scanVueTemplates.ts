@@ -6,6 +6,7 @@ interface LocatorInfo {
   selector: string;
   type:
     | 'data-testid'
+    | 'data-test-id'
     | 'data-test'
     | 'id'
     | 'class'
@@ -60,7 +61,13 @@ const testRelevantElements = new Set([
 const customComponentPattern = /^[A-Z][a-zA-Z0-9]*$/;
 
 // Robust attributes in priority order
-const robustAttributes = ['data-testid', 'data-test', 'id', 'name'];
+const robustAttributes = [
+  'data-testid',
+  'data-test-id',
+  'data-test',
+  'id',
+  'name',
+];
 
 // Vue directives that make elements dynamic or conditional
 const dynamicDirectives = ['v-for', 'v-if', 'v-else-if', 'v-show', 'v-model'];
@@ -241,6 +248,9 @@ function generateFragileWarning(
     `Consider adding data-testid="${rawValue
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, '-')}"`,
+    `Alternative: data-test-id="${rawValue
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')}"`,
     `Alternative: data-test="${rawValue
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, '-')}"`,
@@ -376,6 +386,12 @@ async function processTemplateContent(
       pattern: /data-testid="([^"]+)"/g,
       type: 'data-testid' as const,
       selector: (val: string) => `[data-testid="${val}"]`,
+    },
+    // data-test-id (alternative testing attribute)
+    {
+      pattern: /data-test-id="([^"]+)"/g,
+      type: 'data-test-id' as const,
+      selector: (val: string) => `[data-test-id="${val}"]`,
     },
     // data-test (alternative testing attribute)
     {

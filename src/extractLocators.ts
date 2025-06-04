@@ -103,6 +103,9 @@ const vueProjectPath = process.argv[2] || './test-vue-src';
               case 'data-testid':
                 playwrightMethod = `this.page.getByTestId('${info.rawValue}')`;
                 break;
+              case 'data-test-id':
+                playwrightMethod = `this.page.locator('[data-test-id="${info.rawValue}"]')`;
+                break;
               case 'data-test':
                 playwrightMethod = `this.page.locator('[data-test="${info.rawValue}"]')`;
                 break;
