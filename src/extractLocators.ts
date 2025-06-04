@@ -104,7 +104,7 @@ const vueProjectPath = process.argv[2] || './test-vue-src';
                 playwrightMethod = `this.page.getByTestId('${info.rawValue}')`;
                 break;
               case 'data-test-id':
-                playwrightMethod = `this.page.locator('[data-test-id="${info.rawValue}"]')`;
+                playwrightMethod = `this.page.getByTestId('${info.rawValue}')`;
                 break;
               case 'data-test':
                 playwrightMethod = `this.page.locator('[data-test="${info.rawValue}"]')`;
@@ -255,6 +255,11 @@ const vueProjectPath = process.argv[2] || './test-vue-src';
     const robustOutput = `// ROBUST PAGE OBJECT MODEL CLASSES
 // These locators use stable test attributes and are recommended for E2E testing
 // NOTE: DYNAMIC elements may be repeated, CONDITIONAL elements may not always be present
+// 
+// PLAYWRIGHT CONFIGURATION NOTE:
+// If using data-test-id attributes, configure Playwright to recognize them:
+// In playwright.config.ts: use: { testIdAttribute: 'data-test-id' }
+// (Choose either 'data-testid' or 'data-test-id' as your project standard)
 
 ${robustPageObjects.join('\n\n')}`;
 
