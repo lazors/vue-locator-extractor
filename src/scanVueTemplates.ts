@@ -25,6 +25,7 @@ interface LocatorInfo {
   vueDirectives?: string[];
   customComponent?: boolean;
   parentContext?: string;
+  resolvedFromConstant?: string; // Track if this was resolved from a constant
 }
 
 interface CustomComponentWarning {
@@ -32,6 +33,14 @@ interface CustomComponentWarning {
   component: string;
   line: number;
   message: string;
+}
+
+// Interface for tracking constants
+interface ConstantDefinition {
+  name: string;
+  value: string;
+  type: 'role' | 'label' | 'testid' | 'other';
+  file: string;
 }
 
 // Elements that are typically relevant for testing
@@ -71,6 +80,9 @@ const robustAttributes = [
 
 // Vue directives that make elements dynamic or conditional
 const dynamicDirectives = ['v-for', 'v-if', 'v-else-if', 'v-show', 'v-model'];
+
+// Global constants registry
+const constantsRegistry: Map<string, ConstantDefinition> = new Map();
 
 function detectVueDirectives(attributeString: string): {
   directives: string[];
@@ -265,6 +277,9 @@ function generateFragileWarning(
 }
 
 export async function extractLocatorsFromVue(baseDir: string) {
+  // Clear previous constants registry
+  constantsRegistry.clear();
+
   // Scan Vue files and also JS/TS files that might generate elements
   const vueFiles = await fg(['**/*.vue'], {
     cwd: baseDir,
@@ -299,11 +314,31 @@ export async function extractLocatorsFromVue(baseDir: string) {
     console.log(`   📄 ${relative}`);
   });
 
+  // First pass: Extract constants from all files
+  console.log(`\n🔧 SCANNING FOR CONSTANTS:`);
+  for (const file of [...vueFiles, ...jsFiles]) {
+    const relative = path.relative(baseDir, file);
+    const content = await fs.readFile(file, 'utf-8');
+    extractConstants(content, relative);
+  }
+
+  if (constantsRegistry.size > 0) {
+    console.log(`\n📋 FOUND ${constantsRegistry.size} CONSTANTS:`);
+    constantsRegistry.forEach((constant) => {
+      console.log(
+        `   🔧 ${constant.name} = "${constant.value}" (${constant.type}) - ${constant.file}`
+      );
+    });
+  } else {
+    console.log(`   ⚠️  No constants found`);
+  }
+
   const groupedLocators: Record<string, Record<string, LocatorInfo>> = {};
   const warnings: string[] = [];
   const customComponentWarnings: CustomComponentWarning[] = [];
 
-  // Process Vue files
+  // Second pass: Process Vue files
+  console.log(`\n🔍 PROCESSING TEMPLATES:`);
   for (const file of vueFiles) {
     const relative = path.relative(baseDir, file);
     const keyGroup = relative.replace(/\\/g, '/');
@@ -387,17 +422,38 @@ async function processTemplateContent(
       type: 'data-testid' as const,
       selector: (val: string) => `[data-testid="${val}"]`,
     },
+    // Vue dynamic data-testid: :data-testid="CONSTANT"
+    {
+      pattern: /:data-testid="([^"]+)"/g,
+      type: 'data-testid' as const,
+      selector: (val: string) => `[data-testid="${val}"]`,
+      isDynamic: true,
+    },
     // data-test-id (alternative testing attribute)
     {
       pattern: /data-test-id="([^"]+)"/g,
       type: 'data-test-id' as const,
       selector: (val: string) => `[data-test-id="${val}"]`,
     },
+    // Vue dynamic data-test-id: :data-test-id="CONSTANT"
+    {
+      pattern: /:data-test-id="([^"]+)"/g,
+      type: 'data-test-id' as const,
+      selector: (val: string) => `[data-test-id="${val}"]`,
+      isDynamic: true,
+    },
     // data-test (alternative testing attribute)
     {
       pattern: /data-test="([^"]+)"/g,
       type: 'data-test' as const,
       selector: (val: string) => `[data-test="${val}"]`,
+    },
+    // Vue dynamic data-test: :data-test="CONSTANT"
+    {
+      pattern: /:data-test="([^"]+)"/g,
+      type: 'data-test' as const,
+      selector: (val: string) => `[data-test="${val}"]`,
+      isDynamic: true,
     },
     // id attributes
     {
@@ -436,11 +492,25 @@ async function processTemplateContent(
       type: 'aria-label' as const,
       selector: (val: string) => `[aria-label="${val}"]`,
     },
+    // Vue dynamic aria-label: :aria-label="LABEL_CONSTANT"
+    {
+      pattern: /:aria-label="([^"]+)"/g,
+      type: 'aria-label' as const,
+      selector: (val: string) => `[aria-label="${val}"]`,
+      isDynamic: true,
+    },
     // role attributes
     {
       pattern: /role="([^"]+)"/g,
       type: 'role' as const,
       selector: (val: string) => `[role="${val}"]`,
+    },
+    // Vue dynamic role: :role="ROLE_CONSTANT"
+    {
+      pattern: /:role="([^"]+)"/g,
+      type: 'role' as const,
+      selector: (val: string) => `[role="${val}"]`,
+      isDynamic: true,
     },
     // xpath attributes (custom XPath expressions)
     {
@@ -456,21 +526,46 @@ async function processTemplateContent(
     },
   ];
 
-  for (const { pattern, type, selector } of locatorPatterns) {
+  for (const {
+    pattern,
+    type,
+    selector,
+    isDynamic: patternIsDynamic,
+  } of locatorPatterns) {
     const matches = [...templateContent.matchAll(pattern)];
 
     for (const match of matches) {
-      const rawValue = match[1];
+      let rawValue = match[1];
+      let resolvedFromConstant: string | undefined;
+
+      // Try to resolve constant references
+      const { resolved, constantName } = resolveConstantReference(rawValue);
+      if (constantName) {
+        resolvedFromConstant = `${constantName} → ${resolved}`;
+        rawValue = resolved;
+        console.log(
+          `   🔧 Resolved constant: ${constantName} → "${resolved}" for ${type}`
+        );
+      }
+
       const context = analyzeElementContext(templateContent, match.index || 0);
       const { element, attributes } = extractElementWithAttributes(
         match,
         templateContent
       );
 
+      // Add resolvedFromConstant to attributes for tracking
+      if (resolvedFromConstant) {
+        attributes.resolvedFromConstant = resolvedFromConstant;
+      }
+
       // Detect Vue directives
       const { directives, isDynamic, isConditional } = detectVueDirectives(
         attributes.fullAttributeString || ''
       );
+
+      // Mark as dynamic if it was a Vue dynamic attribute (e.g., :role)
+      const finalIsDynamic = isDynamic || patternIsDynamic || false;
 
       // Check if this is a custom component
       const customComponent = isCustomComponent(element);
@@ -490,7 +585,7 @@ async function processTemplateContent(
       );
 
       // Skip low relevance elements unless they're in dynamic contexts
-      if (testRelevance === 'low' && !isDynamic && !isConditional) {
+      if (testRelevance === 'low' && !finalIsDynamic && !isConditional) {
         continue;
       }
 
@@ -500,7 +595,7 @@ async function processTemplateContent(
         warning = generateFragileWarning(element, rawValue, type);
 
         // Add dynamic/conditional context to warning
-        if (isDynamic) {
+        if (finalIsDynamic) {
           warning += ` | Element may be repeated (v-for detected)`;
         }
         if (isConditional) {
@@ -511,7 +606,12 @@ async function processTemplateContent(
       }
 
       // Generate enhanced key
-      let key = generateEnhancedKey(rawValue, type, isDynamic, isConditional);
+      let key = generateEnhancedKey(
+        rawValue,
+        type,
+        finalIsDynamic,
+        isConditional
+      );
 
       // Ensure unique keys
       let uniqueKey = key;
@@ -531,11 +631,12 @@ async function processTemplateContent(
         robustness,
         testRelevance,
         warning,
-        isDynamic,
+        isDynamic: finalIsDynamic,
         isConditional,
         vueDirectives: directives,
         customComponent,
         parentContext: context.parentContext,
+        resolvedFromConstant,
       };
     }
   }
@@ -738,3 +839,146 @@ const extractElementWithAttributes = (
 
   return { element, attributes };
 };
+
+/**
+ * Extract constant definitions from JavaScript/TypeScript content
+ */
+function extractConstants(content: string, filename: string): void {
+  // Pattern for const declarations with role/label/testid related names
+  const constPatterns = [
+    // const ROLE_BUTTON = 'button';
+    /const\s+([A-Z_]+(?:ROLE|LABEL|TESTID|TEST_ID)[A-Z_]*)\s*=\s*['"`]([^'"`]+)['"`]/g,
+    // const SUBMIT_ROLE = 'button';
+    /const\s+([A-Z_]*(?:ROLE|LABEL|TESTID|TEST_ID)[A-Z_]*)\s*=\s*['"`]([^'"`]+)['"`]/g,
+    // const USER_BUTTON_ROLE = 'button';
+    /const\s+([A-Z_]+)\s*=\s*['"`](button|link|textbox|heading|banner|navigation|main|complementary|contentinfo|search|form|dialog|alert|status|log|marquee|timer|alertdialog|application|article|cell|columnheader|definition|directory|document|group|img|list|listitem|math|note|presentation|region|row|rowgroup|rowheader|separator|slider|spinbutton|table|tablist|tab|tabpanel|toolbar|tooltip|tree|treegrid|treeitem)['"`]/g,
+    // const SUBMIT_LABEL = 'Submit';
+    /const\s+([A-Z_]+)\s*=\s*['"`]([A-Za-z0-9\s]+)['"`]/g,
+  ];
+
+  for (const pattern of constPatterns) {
+    const matches = [...content.matchAll(pattern)];
+    for (const match of matches) {
+      const constantName = match[1];
+      const constantValue = match[2];
+
+      // Determine type based on name and value
+      let type: 'role' | 'label' | 'testid' | 'other' = 'other';
+
+      if (
+        constantName.includes('ROLE') ||
+        [
+          'button',
+          'link',
+          'textbox',
+          'heading',
+          'banner',
+          'navigation',
+          'main',
+          'complementary',
+          'contentinfo',
+          'search',
+          'form',
+          'dialog',
+          'alert',
+          'status',
+          'log',
+          'marquee',
+          'timer',
+          'alertdialog',
+          'application',
+          'article',
+          'cell',
+          'columnheader',
+          'definition',
+          'directory',
+          'document',
+          'group',
+          'img',
+          'list',
+          'listitem',
+          'math',
+          'note',
+          'presentation',
+          'region',
+          'row',
+          'rowgroup',
+          'rowheader',
+          'separator',
+          'slider',
+          'spinbutton',
+          'table',
+          'tablist',
+          'tab',
+          'tabpanel',
+          'toolbar',
+          'tooltip',
+          'tree',
+          'treegrid',
+          'treeitem',
+        ].includes(constantValue.toLowerCase())
+      ) {
+        type = 'role';
+      } else if (constantName.includes('LABEL')) {
+        type = 'label';
+      } else if (
+        constantName.includes('TESTID') ||
+        constantName.includes('TEST_ID')
+      ) {
+        type = 'testid';
+      }
+
+      constantsRegistry.set(constantName, {
+        name: constantName,
+        value: constantValue,
+        type,
+        file: filename,
+      });
+
+      console.log(
+        `   🔧 Found constant: ${constantName} = "${constantValue}" (${type}) in ${filename}`
+      );
+    }
+  }
+}
+
+/**
+ * Resolve constant references in attribute values
+ */
+function resolveConstantReference(value: string): {
+  resolved: string;
+  constantName?: string;
+} {
+  // Handle Vue.js constant binding: :role="ROLE_BUTTON" or v-bind:role="ROLE_BUTTON"
+  const vueConstantMatch = value.match(/^([A-Z_]+)$/);
+  if (vueConstantMatch) {
+    const constantName = vueConstantMatch[1];
+    const constant = constantsRegistry.get(constantName);
+    if (constant) {
+      return { resolved: constant.value, constantName };
+    }
+  }
+
+  // Handle template literal references: ${ROLE_BUTTON}
+  const templateLiteralMatch = value.match(/\$\{([A-Z_]+)\}/);
+  if (templateLiteralMatch) {
+    const constantName = templateLiteralMatch[1];
+    const constant = constantsRegistry.get(constantName);
+    if (constant) {
+      const resolved = value.replace(`\${${constantName}}`, constant.value);
+      return { resolved, constantName };
+    }
+  }
+
+  // Handle JavaScript property access: obj.ROLE_BUTTON
+  const propertyMatch = value.match(/\.([A-Z_]+)$/);
+  if (propertyMatch) {
+    const constantName = propertyMatch[1];
+    const constant = constantsRegistry.get(constantName);
+    if (constant) {
+      return { resolved: constant.value, constantName };
+    }
+  }
+
+  return { resolved: value };
+}
