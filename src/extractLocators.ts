@@ -110,7 +110,16 @@ const vueProjectPath = process.argv[2] || './test-vue-src';
                 playwrightMethod = `this.page.locator('[data-test="${info.rawValue}"]')`;
                 break;
               case 'id':
-                playwrightMethod = `this.page.locator('#${info.rawValue}')`;
+                // Use getById for strong or XGrid elements with id
+                if (
+                  info.element &&
+                  (info.element.toLowerCase() === 'strong' ||
+                    info.element.toLowerCase() === 'xgrid')
+                ) {
+                  playwrightMethod = `this.page.getById('${info.rawValue}')`;
+                } else {
+                  playwrightMethod = `this.page.locator('#${info.rawValue}')`;
+                }
                 break;
               case 'aria-label':
                 playwrightMethod = `this.page.getByLabel('${info.rawValue}')`;
@@ -384,7 +393,7 @@ ${fragilePageObjects.join('\n\n')}
     );
     console.log(`   📄 output/fragileLocatorMap.ts - Improvement tracking map`);
 
-    console.log(`\n🚀 NEXT STEPS:`);
+    console.log(`\n�� NEXT STEPS:`);
     console.log(
       `   1. Review custom component warnings and add test attributes where needed`
     );
