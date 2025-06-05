@@ -110,13 +110,13 @@ const vueProjectPath = process.argv[2] || './test-vue-src';
                 playwrightMethod = `this.page.locator('[data-test="${info.rawValue}"]')`;
                 break;
               case 'id':
-                // Use getById for strong or XGrid elements with id
+                // Use getByTestId for strong or XGrid elements with id
                 if (
                   info.element &&
                   (info.element.toLowerCase() === 'strong' ||
                     info.element.toLowerCase() === 'xgrid')
                 ) {
-                  playwrightMethod = `this.page.getById('${info.rawValue}')`;
+                  playwrightMethod = `this.page.getByTestId('${info.rawValue}')`;
                 } else {
                   playwrightMethod = `this.page.locator('#${info.rawValue}')`;
                 }
@@ -193,7 +193,13 @@ const vueProjectPath = process.argv[2] || './test-vue-src';
                 ? `\n  // WARNING: ${info.warning}`
                 : '';
 
-            return `${comment}${warningComment}\n  ${propertyName} = ${playwrightMethod};`;
+            // Clean up property name - remove xpath references
+            const cleanPropertyName = propertyName
+              .replace(/xpath/gi, '')
+              .replace(/^_+|_+$/g, '');
+            const finalPropertyName = cleanPropertyName || 'element';
+
+            return `${comment}${warningComment}\n  ${finalPropertyName} = ${playwrightMethod};`;
           }
         );
 
@@ -207,7 +213,7 @@ const vueProjectPath = process.argv[2] || './test-vue-src';
           ? `\n// NOTE: Some locators are marked as DYNAMIC or CONDITIONAL - test carefully for element presence`
           : '';
 
-        return `${classComment}${dynamicWarning}\nimport { Page } from '@playwright/test';\n\nexport class ${className} {\n  constructor(protected page: Page) {}\n\n${locatorProperties.join(
+        return `${classComment}${dynamicWarning}\n// File: ${file}\nimport { Page } from '@playwright/test';\n\nexport class ${className} {\n  constructor(protected page: Page) {}\n\n${locatorProperties.join(
           '\n\n'
         )}\n}`;
       });
