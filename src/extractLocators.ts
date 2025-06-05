@@ -91,117 +91,129 @@ const vueProjectPath = process.argv[2] || './test-vue-src';
             .replace(/^_+|_+$/g, '') + 'Page';
 
         // Generate Playwright locator properties
-        const locatorProperties = Object.entries(locatorSet).map(
-          ([key, info]) => {
-            const propertyName = key.replace(/_(\w)/g, (_, letter) =>
-              letter.toUpperCase()
-            );
-            let playwrightMethod = '';
+        const locatorDeclarations: string[] = [];
+        const locatorInitializations: string[] = [];
 
-            // Map to appropriate Playwright locator method
-            switch (info.type) {
-              case 'data-testid':
-                playwrightMethod = `this.page.getByTestId('${info.rawValue}')`;
-                break;
-              case 'data-test-id':
-                playwrightMethod = `this.page.getByTestId('${info.rawValue}')`;
-                break;
-              case 'data-test':
-                playwrightMethod = `this.page.locator('[data-test="${info.rawValue}"]')`;
-                break;
-              case 'id':
-                // Use getByTestId for strong or XGrid elements with id
-                if (
-                  info.element &&
-                  (info.element.toLowerCase() === 'strong' ||
-                    info.element.toLowerCase() === 'xgrid')
-                ) {
-                  playwrightMethod = `this.page.getByTestId('${info.rawValue}')`;
-                } else {
-                  playwrightMethod = `this.page.locator('#${info.rawValue}')`;
-                }
-                break;
-              case 'aria-label':
-                playwrightMethod = `this.page.getByLabel('${info.rawValue}')`;
-                break;
-              case 'role':
-                // Use getByRole with proper options for common interactive roles
-                const commonInteractiveRoles = [
-                  'button',
-                  'link',
-                  'textbox',
-                  'combobox',
-                  'listbox',
-                  'checkbox',
-                  'radio',
-                  'tab',
-                  'menuitem',
-                ];
-                if (
-                  commonInteractiveRoles.includes(info.rawValue.toLowerCase())
-                ) {
-                  playwrightMethod = `this.page.getByRole('${info.rawValue}')`;
-                } else {
-                  // For structural roles, use getByRole with name option if available
-                  playwrightMethod = `this.page.getByRole('${info.rawValue}')`;
-                }
-                break;
-              case 'placeholder':
-                playwrightMethod = `this.page.getByPlaceholder('${info.rawValue}')`;
-                break;
-              case 'name':
-                // For form elements, prefer getByLabel if we can infer it's a form field
-                const formElements = ['input', 'textarea', 'select'];
-                if (
-                  info.element &&
-                  formElements.includes(info.element.toLowerCase())
-                ) {
-                  // Use getByLabel if there's likely an associated label, otherwise use name locator
-                  playwrightMethod = `this.page.getByLabel('${info.rawValue}')`;
-                } else {
-                  playwrightMethod = `this.page.locator('[name="${info.rawValue}"]')`;
-                }
-                break;
-              case 'class':
-                playwrightMethod = `this.page.locator('${info.selector}')`;
-                break;
-              case 'xpath':
-                const escapedXPath = info.rawValue.replace(/'/g, "\\'");
-                playwrightMethod = `this.page.locator('${escapedXPath}')`;
-                break;
-              default:
-                playwrightMethod = `this.page.locator('${info.selector}')`;
-            }
+        Object.entries(locatorSet).forEach(([key, info]) => {
+          // Convert to proper camelCase
+          const propertyName = key
+            .replace(/_(\w)/g, (_, letter) => letter.toUpperCase()) // snake_case to camelCase
+            .replace(/^(\w)/, (_, letter) => letter.toLowerCase()) // ensure first letter is lowercase
+            .replace(/[^a-zA-Z0-9]/g, ''); // remove any special characters
 
-            // Enhanced comment with dynamic/conditional information
-            let comment = `  // ${info.element} with ${info.type}: "${info.rawValue}" (${info.robustness})`;
+          let playwrightMethod = '';
 
-            if (info.isDynamic && info.isConditional) {
-              comment += ` - DYNAMIC & CONDITIONAL`;
-            } else if (info.isDynamic) {
-              comment += ` - DYNAMIC (may be repeated)`;
-            } else if (info.isConditional) {
-              comment += ` - CONDITIONAL (may not always be present)`;
-            }
-
-            if (info.parentContext) {
-              comment += ` - ${info.parentContext}`;
-            }
-
-            const warningComment =
-              includeWarnings && info.warning
-                ? `\n  // WARNING: ${info.warning}`
-                : '';
-
-            // Clean up property name - remove xpath references
-            const cleanPropertyName = propertyName
-              .replace(/xpath/gi, '')
-              .replace(/^_+|_+$/g, '');
-            const finalPropertyName = cleanPropertyName || 'element';
-
-            return `${comment}${warningComment}\n  ${finalPropertyName} = ${playwrightMethod};`;
+          // Map to appropriate Playwright locator method
+          switch (info.type) {
+            case 'data-testid':
+              playwrightMethod = `page.getByTestId('${info.rawValue}')`;
+              break;
+            case 'data-test-id':
+              playwrightMethod = `page.getByTestId('${info.rawValue}')`;
+              break;
+            case 'data-test':
+              playwrightMethod = `page.locator('[data-test="${info.rawValue}"]')`;
+              break;
+            case 'id':
+              // Use getByTestId for strong or XGrid elements with id
+              if (
+                info.element &&
+                (info.element.toLowerCase() === 'strong' ||
+                  info.element.toLowerCase() === 'xgrid')
+              ) {
+                playwrightMethod = `page.getByTestId('${info.rawValue}')`;
+              } else {
+                playwrightMethod = `page.locator('#${info.rawValue}')`;
+              }
+              break;
+            case 'aria-label':
+              playwrightMethod = `page.getByLabel('${info.rawValue}')`;
+              break;
+            case 'role':
+              // Use getByRole with proper options for common interactive roles
+              const commonInteractiveRoles = [
+                'button',
+                'link',
+                'textbox',
+                'combobox',
+                'listbox',
+                'checkbox',
+                'radio',
+                'tab',
+                'menuitem',
+              ];
+              if (
+                commonInteractiveRoles.includes(info.rawValue.toLowerCase())
+              ) {
+                playwrightMethod = `page.getByRole('${info.rawValue}')`;
+              } else {
+                // For structural roles, use getByRole with name option if available
+                playwrightMethod = `page.getByRole('${info.rawValue}')`;
+              }
+              break;
+            case 'placeholder':
+              playwrightMethod = `page.getByPlaceholder('${info.rawValue}')`;
+              break;
+            case 'name':
+              // For form elements, prefer getByLabel if we can infer it's a form field
+              const formElements = ['input', 'textarea', 'select'];
+              if (
+                info.element &&
+                formElements.includes(info.element.toLowerCase())
+              ) {
+                // Use getByLabel if there's likely an associated label, otherwise use name locator
+                playwrightMethod = `page.getByLabel('${info.rawValue}')`;
+              } else {
+                playwrightMethod = `page.locator('[name="${info.rawValue}"]')`;
+              }
+              break;
+            case 'class':
+              playwrightMethod = `page.locator('${info.selector}')`;
+              break;
+            case 'xpath':
+              const escapedXPath = info.rawValue.replace(/'/g, "\\'");
+              playwrightMethod = `page.locator('${escapedXPath}')`;
+              break;
+            default:
+              playwrightMethod = `page.locator('${info.selector}')`;
           }
-        );
+
+          // Enhanced comment with dynamic/conditional information
+          let comment = `  // ${info.element} with ${info.type}: "${info.rawValue}" (${info.robustness})`;
+
+          if (info.isDynamic && info.isConditional) {
+            comment += ` - DYNAMIC & CONDITIONAL`;
+          } else if (info.isDynamic) {
+            comment += ` - DYNAMIC (may be repeated)`;
+          } else if (info.isConditional) {
+            comment += ` - CONDITIONAL (may not always be present)`;
+          }
+
+          if (info.parentContext) {
+            comment += ` - ${info.parentContext}`;
+          }
+
+          const warningComment =
+            includeWarnings && info.warning
+              ? `\n  // WARNING: ${info.warning}`
+              : '';
+
+          // Clean up property name - remove xpath references and ensure camelCase
+          const cleanPropertyName = propertyName
+            .replace(/xpath/gi, '')
+            .replace(/^_+|_+$/g, '');
+          const finalPropertyName = cleanPropertyName || 'element';
+
+          // Add to declarations array
+          locatorDeclarations.push(
+            `${comment}${warningComment}\n  readonly ${finalPropertyName}: Locator;`
+          );
+
+          // Add to initializations array
+          locatorInitializations.push(
+            `    this.${finalPropertyName} = ${playwrightMethod};`
+          );
+        });
 
         const classComment = includeWarnings
           ? `// FRAGILE LOCATORS - Consider improving these with stable test attributes`
@@ -213,9 +225,11 @@ const vueProjectPath = process.argv[2] || './test-vue-src';
           ? `\n// NOTE: Some locators are marked as DYNAMIC or CONDITIONAL - test carefully for element presence`
           : '';
 
-        return `${classComment}${dynamicWarning}\n// File: ${file}\nimport { Page } from '@playwright/test';\n\nexport class ${className} {\n  constructor(protected page: Page) {}\n\n${locatorProperties.join(
+        return `${classComment}${dynamicWarning}\n// File: ${file}\nimport { Page, Locator } from '@playwright/test';\n\nexport class ${className} {\n${locatorDeclarations.join(
           '\n\n'
-        )}\n}`;
+        )}\n\n  constructor(protected page: Page) {\n${locatorInitializations.join(
+          '\n'
+        )}\n  }\n}`;
       });
     };
 
