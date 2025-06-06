@@ -1,12 +1,12 @@
-import * as fs from 'fs';
-import * as path from 'path';
+import * as fs from 'fs'
+import * as path from 'path'
 
 /**
  * Ensures a directory exists, creating it if necessary
  */
 export function ensureDirectoryExists(dirPath: string): void {
   if (!fs.existsSync(dirPath)) {
-    fs.mkdirSync(dirPath, { recursive: true });
+    fs.mkdirSync(dirPath, { recursive: true })
   }
 }
 
@@ -15,9 +15,9 @@ export function ensureDirectoryExists(dirPath: string): void {
  */
 export function readFileContent(filePath: string): string {
   try {
-    return fs.readFileSync(filePath, 'utf-8');
+    return fs.readFileSync(filePath, 'utf-8')
   } catch (error) {
-    throw new Error(`Failed to read file ${filePath}: ${error}`);
+    throw new Error(`Failed to read file ${filePath}: ${error}`)
   }
 }
 
@@ -26,10 +26,10 @@ export function readFileContent(filePath: string): string {
  */
 export function writeFileContent(filePath: string, content: string): void {
   try {
-    ensureDirectoryExists(path.dirname(filePath));
-    fs.writeFileSync(filePath, content, 'utf-8');
+    ensureDirectoryExists(path.dirname(filePath))
+    fs.writeFileSync(filePath, content, 'utf-8')
   } catch (error) {
-    throw new Error(`Failed to write file ${filePath}: ${error}`);
+    throw new Error(`Failed to write file ${filePath}: ${error}`)
   }
 }
 
@@ -37,7 +37,7 @@ export function writeFileContent(filePath: string, content: string): void {
  * Converts a file path to a component name
  */
 export function pathToComponentName(filePath: string): string {
-  return path.basename(filePath, path.extname(filePath));
+  return path.basename(filePath, path.extname(filePath))
 }
 
 /**
@@ -48,15 +48,15 @@ export function sanitizeKey(key: string): string {
     .replace(/[^a-zA-Z0-9_$]/g, '_')
     .replace(/^[0-9]/, '_$&')
     .replace(/_{2,}/g, '_')
-    .replace(/^_+|_+$/g, '');
+    .replace(/^_+|_+$/g, '')
 }
 
 /**
  * Extracts the attribute value from a string
  */
 export function extractAttributeValue(attributeString: string): string | null {
-  const match = attributeString.match(/=["']([^"']+)["']/);
-  return match ? match[1] : null;
+  const match = attributeString.match(/=["']([^"']+)["']/)
+  return match ? match[1] : null
 }
 
 /**
@@ -69,11 +69,11 @@ export function generateLocatorName(
   let name = attributeValue
     .replace(/[^a-zA-Z0-9]/g, '_')
     .replace(/_{2,}/g, '_')
-    .replace(/^_+|_+$/g, '');
+    .replace(/^_+|_+$/g, '')
 
   if (elementTag && !name.toLowerCase().includes(elementTag.toLowerCase())) {
-    name = `${name}_${elementTag}`;
+    name = `${name}_${elementTag}`
   }
 
-  return name || 'element';
+  return name || 'element'
 }
