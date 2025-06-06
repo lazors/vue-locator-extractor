@@ -5,6 +5,8 @@
     "scripts": {
         "extract": "tsx src/extractLocators.ts",
         "lint": "eslint ./src --ext .ts",
+        "lint:fix": "eslint ./src --ext .ts --fix",
+        "lint:check": "eslint ./src --ext .ts --max-warnings 0",
         "test": "tsx src/test/sampleTest.ts"
     },
     "dependencies": {
@@ -15,9 +17,9 @@
         "@playwright/test": "^1.52.0",
         "@types/fs-extra": "^11.0.4",
         "@types/node": "^22.15.29",
-        "@typescript-eslint/eslint-plugin": "^6.13.1",
-        "@typescript-eslint/parser": "^6.13.1",
-        "eslint": "^8.50.0",
+        "@typescript-eslint/eslint-plugin": "^7.18.0",
+        "@typescript-eslint/parser": "^7.18.0",
+        "eslint": "^8.57.0",
         "playwright": "^1.52.0",
         "tsx": "^4.7.0",
         "typescript": "^5.3.3"

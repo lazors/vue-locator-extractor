@@ -1,0 +1,33 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+build/
+output/
+
+# Test coverage
+coverage/
+
+# Generated files
+*.generated.ts
+*.d.ts
+
+# Lock files
+package-lock.json
+yarn.lock
+
+# IDE files
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Vue source files (we're processing these, not linting them as JS/TS)
+test-vue-src/
+examples/
+
+# Git
+.git/ 
