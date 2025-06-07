@@ -4,9 +4,9 @@
     "type": "module",
     "scripts": {
         "extract": "tsx src/extractLocators.ts",
-        "lint": "eslint ./src --ext .ts",
-        "lint:fix": "eslint ./src --ext .ts --fix",
-        "lint:check": "eslint ./src --ext .ts --max-warnings 0",
+        "lint": "eslint ./src",
+        "lint:fix": "eslint ./src --fix",
+        "lint:check": "eslint ./src --max-warnings 0",
         "test": "tsx src/test/sampleTest.ts"
     },
     "dependencies": {
@@ -14,14 +14,18 @@
         "fs-extra": "^11.2.0"
     },
     "devDependencies": {
+        "@eslint/eslintrc": "^3.3.1",
+        "@eslint/js": "^9.28.0",
         "@playwright/test": "^1.52.0",
         "@types/fs-extra": "^11.0.4",
         "@types/node": "^22.15.29",
-        "@typescript-eslint/eslint-plugin": "^7.18.0",
-        "@typescript-eslint/parser": "^7.18.0",
-        "eslint": "^8.57.0",
+        "@typescript-eslint/eslint-plugin": "^8.0.0",
+        "@typescript-eslint/parser": "^8.0.0",
+        "eslint": "^9.15.0",
+        "globals": "^16.2.0",
         "playwright": "^1.52.0",
         "tsx": "^4.7.0",
-        "typescript": "^5.3.3"
+        "typescript": "^5.3.3",
+        "typescript-eslint": "^8.33.1"
     }
 }
